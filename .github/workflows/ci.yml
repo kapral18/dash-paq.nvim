@@ -41,3 +41,41 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           version: "2.5.2"
           args: --check .
+
+  # Tags and publishes a GitHub release on every green push to main that has
+  # feat/fix/perf or breaking commits since the last tag (rules in cliff.toml).
+  release:
+    needs: [test, stylua]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: release
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GIT_CLIFF_VERSION: "2.14.2"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install git-cliff
+        run: |
+          asset="git-cliff-${GIT_CLIFF_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          cd "$RUNNER_TEMP"
+          gh release download "v${GIT_CLIFF_VERSION}" -R orhun/git-cliff -p "$asset" -p "$asset.sha512"
+          sha512sum -c "$asset.sha512"
+          tar xzf "$asset"
+          echo "$RUNNER_TEMP/git-cliff-${GIT_CLIFF_VERSION}" >> "$GITHUB_PATH"
+
+      - name: Create release
+        run: |
+          version=$(git-cliff --bumped-version)
+          if git rev-parse -q --verify "refs/tags/$version" >/dev/null; then
+            echo "No releasable commits since $version; skipping."
+            exit 0
+          fi
+          git-cliff --unreleased --tag "$version" --strip all > "$RUNNER_TEMP/notes.md"
+          gh release create "$version" --target "$GITHUB_SHA" --title "$version" --notes-file "$RUNNER_TEMP/notes.md"
