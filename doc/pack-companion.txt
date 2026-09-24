@@ -1,0 +1,449 @@
+*pack-companion.txt* Lazy-loading spec layer and update dashboard for vim.pack
+
+                             pack-companion.nvim
+
+CONTENTS                                             *pack-companion-contents*
+
+  1. Introduction ...............................|pack-companion-introduction|
+  2. Requirements ...............................|pack-companion-requirements|
+  3. Installation ...............................|pack-companion-installation|
+  4. Setup .............................................|pack-companion-setup|
+  5. Spec fields ........................................|pack-companion-spec|
+  6. Configuration ....................................|pack-companion-config|
+  7. Commands .......................................|pack-companion-commands|
+  8. Dashboard keys ...........................|pack-companion-dashboard-keys|
+  9. Version policy ...........................|pack-companion-version-policy|
+  10. Local development (dev) ............................|pack-companion-dev|
+  11. Health ..........................................|pack-companion-health|
+  12. State files ......................................|pack-companion-state|
+  13. Highlight groups ............................|pack-companion-highlights|
+  14. Limitations ................................|pack-companion-limitations|
+  15. Development ................................|pack-companion-development|
+
+==============================================================================
+1. Introduction                                  *pack-companion-introduction*
+
+Neovim >= 0.12 ships |vim.pack| — install, update, a lockfile — but no
+lazy-loading spec layer, version policy, or update overview.
+pack-companion.nvim adds those three:
+
+  - a lazy.nvim-shaped spec layer (cmd/event/ft/keys, dependencies,
+    init/config/opts, build hooks) resolving to plain |vim.pack.add()|
+    calls;
+  - a tag-vs-branch version policy: release tags or default branch, per
+    plugin;
+  - an interactive dashboard (|:PackDashboard|) adding drift, orphan,
+    risky-pin, and breaking-change detection over vim.pack's own report.
+
+Installs/updates/deletes and the lockfile stay |vim.pack|'s own.
+
+==============================================================================
+2. Requirements                                  *pack-companion-requirements*
+
+  - Neovim >= 0.12.4 (tested; |vim.pack| needs only 0.12).
+    `:checkhealth pack_companion` warns below it.
+  - `git` on PATH: install/update (`vim.pack` itself), version-policy/
+    dashboard analysis.
+  - No third-party Lua dependencies.
+
+==============================================================================
+3. Installation                                  *pack-companion-installation*
+
+Bootstrap with |vim.pack.add()| like any plugin, then call
+`setup()`: >lua
+    vim.pack.add({ "https://github.com/kapral18/pack-companion.nvim" })
+
+    require("pack_companion").setup({
+      spec = {
+        "nvim-lua/plenary.nvim",
+      },
+    })
+<
+There is no `plugin/` directory: every command registers inside
+`setup()`, called once from `init.lua`, during startup. It never
+disables 'loadplugins' or takes over the native |load-plugins| step; it
+follows |vim.pack.add()|'s own startup semantics.
+
+`setup()` adds each startup plugin to 'runtimepath', then runs
+`config`/`opts` — so `require()`/`:colorscheme` work — before the native
+"load plugins" step sources `plugin/**` and `after/plugin/**`. A
+deferred (`cmd`/`event`/`ft`/`keys`) plugin loads the lazy.nvim way once
+triggered: `plugin/**`, `config`/`opts`, `after/plugin/**`.
+
+  - Globals a `plugin/` file reads (e.g. `vim.g.loaded_netrw`), other
+    |vim.pack.add()| calls, and 'runtimepath' edits: set them anywhere in
+    `init.lua`; "load plugins" runs after it.
+  - A deferred plugin pulled in early (a startup entry's dependency, or
+    triggered from `init.lua` after `setup()` returns) follows the
+    startup path: 'runtimepath', `config`/`opts`, `plugin/**` left to
+    the native step.
+  - An argv buffer's own event, or a `-c`/`+cmd` startup command,
+    triggers loading like any post-startup trigger — `plugin/**`,
+    `config`/`opts`, `after/plugin/**` immediately. Exception: inside a
+    file Neovim is sourcing, `after/plugin/**` waits for |VimEnter|.
+  - Resetting 'loadplugins', or starting with `--noplugin`, `--clean`,
+    or `-u NONE`, skips `plugin/**` sourcing like a plain
+    |vim.pack.add()|: startup plugins still land on 'runtimepath', run
+    `config`/`opts`.
+  - When a declared plugin's `src` changes between two `setup()` runs,
+    `setup()` deletes the old clone and re-clones it from the new `src`.
+
+==============================================================================
+4. Setup                                                *pack-companion-setup*
+
+                                                *pack-companion.setup()*
+`require("pack_companion").setup(opts)` — call exactly once; a second
+call raises a Lua error. `opts` fields:
+
+  `spec`        list of spec tables/strings (see |pack-companion-spec|).
+  `modules`     list of Lua module names, each `require()`d, returning a
+                spec or list of specs; splits config across files
+                instead of one big `spec` list.
+
+At least one of `spec`/`modules` is required; combine both if needed.
+Remaining fields (`dashboard`, `version_policy`, `default_host`,
+`hosts`, and `dev`) are covered in |pack-companion-config|.
+
+==============================================================================
+5. Spec fields                                           *pack-companion-spec*
+
+Each `spec` entry (or one returned from `modules`) is a string
+(`"owner/repo"`) or a table, lazy.nvim-shaped. Specs resolving to the
+same `name` merge field by field, not "last wins": `src`/`dir` keep the
+first value, `opts` deep-merges, `dependencies`/`cmd`/`event`/`ft`/`keys`
+union, `priority` takes max, `lazy = false` wins over `true`; every
+merged spec's own `init`/`config` runs.
+
+Supported fields:
+
+  `src`/`[1]`      Git source: `owner/repo` (via `default_host`),
+                   `scheme://` URL, `git@...`, or `gh:...`, verbatim.
+  `name`           Explicit name; else `src`'s basename minus `.git`, or
+                   `dir`'s basename.
+  `dir`            Local directory onto 'runtimepath' (load order after
+                   the built-in `site` pack dir) instead of an installed
+                   `vim.pack` clone.
+  `dev`            `true` loads from `dev.path .. "/" .. name` when
+                   present; see |pack-companion-dev|.
+  `version`        `false` = branch tip; `"*"` = latest semver tag; a
+                   `^`/`~`/`>`/`<`/`=` range = greatest matching tag;
+                   other string = literal tag/branch/commit; omitted =
+                   version policy decides (|pack-companion-version-policy|).
+  `commit`/`tag`/`branch`
+                   Explicit pin; priority over `version`.
+  `enabled`/`cond` Boolean or function; any false among merged specs
+                   disables it.
+  `optional`       Disabled unless at least one merged spec isn't
+                   `optional`.
+  `dependencies`   `owner/repo` strings or spec tables, loaded before
+                   the entry; cycles silently cut.
+  `init`           `init(spec)`, at setup time, before install.
+  `build`          Function, `":Ex command"` string, or shell command
+                   (`/bin/sh -c`, plugin's path), on `PackChanged`
+                   install/update. A deferred entry loads first so build
+                   acts on the real plugin; during `init.lua` sourcing,
+                   the load and build both queue to run once on
+                   `VimEnter`.
+  `opts`           Table (deep-merged across specs) or `fn(spec, opts)`
+                   returning a replacement table.
+  `config`         `fn(spec, opts)`. With no `config` function,
+                   `setup(opts)` auto-calls, only when a spec supplied
+                   `opts` or `config = true`, on the first of: `name`,
+                   `name` minus one `.nvim`/`.vim`/`nvim-`/`vim-` affix,
+                   or `name` with `-` -> `_` — whichever `require()`s
+                   and has a `setup` function.
+  `keys`           Table, or `fn(spec)` returning a key list; entries: `lhs`/`[1]`,
+                   `rhs`/`[2]`, `mode` (default `"n"`),
+                   `ft`/`desc`/`expr`/`nowait`/`silent`, `noremap`/`remap`,
+                   `enabled`. A known `rhs` becomes a real mapping on
+                   load, any route. `lhs`-only: loads the plugin,
+                   replays `lhs` into its own mapping.
+  `cmd`            String/list of command names, deferring load until
+                   first use; forwards `<bang>`/range/count/`<mods>`/args
+                   to the real command.
+  `event`          String, `{event, pattern}` table, or list; defers load
+                   until fired. After load, only the plugin's own
+                   autocmd group(s) replay: by buffer for a
+                   filename-shaped event, `pattern` for
+                   `User`/`CmdlineEnter`/`ColorScheme`/`OptionSet`/
+                   `ModeChanged` (others by buffer, may not match); no
+                   augroup, no replay.
+  `ft`             String or list of filetypes, deferring load.
+  `lazy`           `false` loads at startup even when triggers are set;
+                   `true` keeps it deferred with no trigger (loadable via
+                   `:PackLoad` or as a dependency).
+  `priority`       Load order among non-deferred entries (default 50;
+                   higher first; ties keep spec order). Values below 50
+                   are clamped to 50.
+
+Unsupported fields                           *pack-companion-spec-unsupported*
+
+Not read by pack-companion.nvim: `main`/`module` (require-triggered
+loading), `import`/`specs`/`pin`/`submodules`/`url`, and lazy.nvim's
+synthetic `VeryLazy`/`User` startup events (`event = "User"` with your
+own `pattern` still works; lazy.nvim's own firing isn't replicated).
+
+==============================================================================
+6. Configuration                                       *pack-companion-config*
+
+`opts.dashboard`, `opts.version_policy`, `opts.dev` each accept `false`
+to disable, or a table deep-merged over the defaults below.
+
+dashboard                                    *pack-companion-config-dashboard*
+>lua
+    dashboard = {
+      width_ratio = 0.68,       -- window width fraction
+      height_ratio = 0.68,      -- window height fraction
+      min_width = 84,
+      min_height = 18,
+      margin = 6,               -- gap kept to editor edge
+      refresh_on_open = true,   -- refresh online on open
+      ascii = false,            -- true = no Nerd Font glyphs
+      fast_scroll = true,
+      fetch_concurrency = 8,    -- concurrent git fetch jobs
+      skip_risk_confirm = false,  -- skip confirm on risky updates
+      skip_clean_confirm = false, -- skip confirm on orphan cleanup
+    }
+<
+`opts.dashboard = false` disables every dashboard command
+(|pack-companion-commands|) except |:PackTrace|/|:PackLoad|, which
+belong to the loader.
+
+version_policy                          *pack-companion-config-version_policy*
+>lua
+    version_policy = {
+      min_tags = 3,
+      commit_lag_multiplier = 1.5,
+      max_commits_since_tag = 150,
+      sparse_tag_threshold = 30,
+      max_tag_age_days = 180,
+      ttl_days = 3,             -- cache lifetime before recompute
+      avg_window = 6,           -- tags averaged for release size
+      startup_delay_ms = 200,   -- delay before startup refresh
+    }
+<
+See |pack-companion-version-policy| for what each threshold gates.
+`opts.version_policy = false` disables the policy: plugins with no
+explicit `version`/`commit`/`tag`/`branch` track default branch.
+
+default_host / hosts                             *pack-companion-config-hosts*
+>lua
+    default_host = "https://github.com/", -- for "owner/repo" shorthand
+<
+`hosts` is merged over built-in `github.com`/`codeberg.org` entries
+(both `{ compare = "compare/%s...%s", commit = "commit/%s" }`). Add a
+host (both `compare` and `commit`) for its dashboard diff/commit links;
+an entry missing either field is dropped.
+
+dev                                                *pack-companion-config-dev*
+See |pack-companion-dev|.
+
+==============================================================================
+7. Commands                                          *pack-companion-commands*
+
+:PackDashboard[!]                                             *:PackDashboard*
+Open the dashboard; repeated calls reuse the window. `!` closes an open
+dashboard and reopens it with a fresh scan.
+
+:PackSync                                                          *:PackSync*
+Raw online `vim.pack.update()` report: fetches every remote, refreshes
+the cached report/version policy.
+
+:PackStatus                                                      *:PackStatus*
+Raw offline report (`vim.pack.update(nil, { offline = true })`): local
+refs only, no network.
+
+:PackDashboardStats                                      *:PackDashboardStats*
+Print last raw update/same/error counters, check timestamps.
+
+:PackTrace [plugin]                                               *:PackTrace*
+Shows every enabled entry's load status, load reason, load count, and
+trigger set in a buffer; filters to one plugin by name. `q`/`<Esc>`
+closes it.
+
+:PackLoad {plugin}                                                 *:PackLoad*
+Force-load one deferred entry: dependencies, `config`/auto-`setup()`
+(`init` ran at setup time), after/plugin files, as if triggered.
+
+:PackLockInfo                                                  *:PackLockInfo*
+Show the lockfile path, plugin count, mtime.
+
+:PackLockExport {path}                                       *:PackLockExport*
+Copy the live lockfile to `{path}`.
+
+:PackLockImport {path}                                       *:PackLockImport*
+Overwrite the live lockfile from `{path}` after validating its JSON
+shape. Restart, or run |:PackSync|, to apply.
+
+:PackPolicyRebuild [plugin]                               *:PackPolicyRebuild*
+Clear and recompute the cached tag/branch heuristic; a plugin name
+rebuilds only it.
+
+==============================================================================
+8. Dashboard keys                              *pack-companion-dashboard-keys*
+
+Buffer-local to the dashboard window:
+
+  `q`/`<Esc>`      close the dashboard
+  `gg`             jump to the first row
+  `R`              refresh online (fetch)
+  `r`              refresh offline (no fetch)
+  `<Space>`/`x`    toggle selection (row, or visual range)
+  `a`              select all visible
+  `A`              clear selection
+  `<CR>`           update cursor plugin, if pending
+  `u`              update selected, else cursor, pending
+  `U`              update all visible pending
+  `C`              clean orphans (selected, else all), confirm
+  `V`              heal drift: re-checkout to declared version, offline
+  `o`              open diff URL, fallback repo URL
+  `O`              open repo URL
+  `K`              open the details popup
+  `T`              open |:PackTrace| for the row under the cursor
+  `f`              cycle filter: all -> updates -> issues -> selected
+  `s`              cycle sort: status <-> name
+  `/`              search by name substring
+  `c`              clear the search
+  `?`              open the key-reference help popup
+
+Filter/search/sort/selection state persists across sessions (see
+|pack-companion-state|).
+
+Details popup keys                               *pack-companion-details-keys*
+`K` opens: one line per pending commit (breaking-change markers), plus
+repo/path/revision metadata.
+
+  `q`/`<Esc>`   close the popup
+  `o`           open the commit under the cursor
+  `O`           open the compare URL for every pending commit
+  `r`           open the plugin repository
+
+Row status values: `update`/`same`/`error`/`unknown`, `orphan`
+(installed, no longer declared), `drift` (checkout no longer matches
+declared version), `risky` (`version = "*"` would pick a non-release
+tag over the latest real release), and `local` (a |pack-companion-dev|
+override, never touched by `vim.pack`).
+
+==============================================================================
+9. Version policy                              *pack-companion-version-policy*
+
+With no `version`/`commit`/`tag`/`branch`, the version policy decides
+release tags or default branch tip. It caches the decision per plugin
+under |pack-companion-state|, re-evaluating once per `ttl_days` (default
+3), async after startup (`startup_delay_ms` after `VimEnter`, one plugin
+per tick) or sync on |:PackSync|/|:PackStatus|/|:PackPolicyRebuild|. A
+decision takes effect at the next startup's `setup()` call, not
+immediately; the first time a policy is generated, pack-companion.nvim
+notifies "restart to apply tag pins".
+
+No semver-shaped tags always resolves to `branch`. Otherwise four gates
+apply, in order, against commits landed since the latest tag:
+
+  1. Release-history (`min_tags`/`sparse_tag_threshold`): under
+     `min_tags` tags, `branch` only past `sparse_tag_threshold` commits
+     since the last tag.
+  2. Commit-ratio (`commit_lag_multiplier`/`avg_window`): `branch` when
+     commits since the latest tag exceed a recency-weighted average
+     commits-per-release over the last `avg_window` (floor 3) tags,
+     times `commit_lag_multiplier`.
+  3. Tag-age (`max_tag_age_days`): `branch` when the latest tag is older
+     than `max_tag_age_days` and a commit has landed since.
+  4. Absolute-cap (`max_commits_since_tag`): past this many commits
+     since the latest tag, always `branch`.
+
+A `tags` decision resolves to a caret/tilde range from the latest tag
+(`^MAJOR.0` for `MAJOR >= 1`, else `~0.MINOR`), so `vim.pack` resolves
+the greatest matching tag itself on every install/update.
+
+Defaults: |pack-companion-config-version_policy|. Tag parsing is strict
+MAJOR.MINOR.PATCH semver (matching `vim.pack` 0.12.4's own resolution);
+two-part tags like `nvim-0.6` never beat a real `vX.Y.Z` tag.
+
+==============================================================================
+10. Local development (dev)                               *pack-companion-dev*
+
+`opts.dev` loads a plugin from a local checkout instead of its
+`vim.pack` clone, for iterating on your own plugin.
+>lua
+    dev = {
+      path = "~/projects",   -- base dir; plugin resolves to path .. "/" .. name
+      patterns = {},      -- Lua patterns matched against plugin name
+      fallback = true,    -- fall back to normal src when the dir is missing
+    }
+<
+An entry is a dev entry when `dev = true` or its name matches
+`dev.patterns`, and `path .. "/" .. name` exists at setup time. It loads
+from that directory onto 'runtimepath', not an installed/updated
+`vim.pack` clone, and the dashboard shows it as `local`. `dev = false`
+opts out even when the name matches `dev.patterns`.
+
+Missing directory: `fallback = true` (default) loads normally from
+`src`; `fallback = false` disables it, with a warning. `opts.dev = false`
+disables dev resolution entirely.
+
+==============================================================================
+11. Health                                             *pack-companion-health*
+
+`:checkhealth pack_companion` checks:
+
+  - `setup()` has been called.
+  - Neovim >= 0.12.4 (warns below; see |pack-companion-requirements|).
+  - `vim.pack` is available.
+  - `git` is on PATH.
+  - |pack-companion-state| dir exists and is writable.
+
+==============================================================================
+12. State files                                         *pack-companion-state*
+
+Under `stdpath("state") .. "/pack-companion/"`:
+
+  `version_policy.json`   per-plugin strategy, latest tag, reasoning
+                          (schema 3; see |pack-companion-version-policy|).
+  `dashboard_state.json`  last update report (per-plugin status, pending
+                          commits, diff URLs), timestamps/counters,
+                          filter/sort/search/selection state.
+
+`vim.pack`'s own lockfile is not written by pack-companion.nvim except
+through |:PackLockInfo|/|:PackLockExport|/|:PackLockImport|; dashboard
+updates and cleans still change it through `vim.pack`. It lives at
+`stdpath("config") .. "/nvim-pack-lock.json"`.
+
+==============================================================================
+13. Highlight groups                               *pack-companion-highlights*
+
+All groups are `default = true` links; any colorscheme can override
+them without `:highlight!`.
+
+  PackDashboardTitle         PackDashboardStatusOrphan
+  PackDashboardFiltered      PackDashboardStatusDrift
+  PackDashboardProgress      PackDashboardStatusRisky
+  PackDashboardKey           PackDashboardStatusLocal
+  PackDashboardMeta          PackDashboardRiskBreak
+  PackDashboardLabel         PackDashboardRiskSafe
+  PackDashboardValue         PackDashboardRiskUnknown
+  PackDashboardBar           PackDashboardLink
+  PackDashboardRule          PackDashboardSelected
+  PackDashboardHeader        PackDashboardStatusUpdate
+  PackDashboardStatusSame    PackDashboardStatusError
+  PackDashboardStatusUnknown
+
+==============================================================================
+14. Limitations                                   *pack-companion-limitations*
+
+  - `vim.pack` is still experimental; its API can change between
+    releases.
+  - The dashboard calls no private `vim.pack` function; it parses the
+    plain-text report `vim.pack.update()` opens in the
+    `nvim-pack://confirm` scratch buffer. A future format change can
+    silently break parsing until this plugin catches up.
+  - Differences from lazy.nvim: see |pack-companion-spec-unsupported| and
+    the startup model in |pack-companion-installation|.
+
+==============================================================================
+15. Development                                   *pack-companion-development*
+
+  `make test`   run the test suite.
+  `make lint`   run formatting/lint checks.
+
+==============================================================================
+vim:tw=78:ts=8:ft=help:norl:
