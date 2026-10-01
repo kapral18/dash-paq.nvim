@@ -4,8 +4,8 @@ local t = require("runner")
 local dirfixture = require("support.dirfixture")
 local gitfixture = require("support.gitfixture")
 
-_G.PACK_COMPANION_TEST_LOG = {}
-_G.PACK_COMPANION_CMD_CAPTURE = nil
+_G.DASH_PAQ_TEST_LOG = {}
+_G.DASH_PAQ_CMD_CAPTURE = nil
 
 local cmd_dir = dirfixture.new("cmdplug", dirfixture.marker_plugin_files("cmdplug-loaded"))
 local event_dir = dirfixture.new("eventplug", dirfixture.marker_plugin_files("eventplug-loaded"))
@@ -86,7 +86,7 @@ vim.api.nvim_create_autocmd("User", {
 -- populates `id` for it, so a snapshot keyed on au.id (not group) would raise "table index is nil".
 vim.cmd("autocmd BufEnter * let g:pc_test_vimscript_bufenter = get(g:, 'pc_test_vimscript_bufenter', 0) + 1")
 
-require("pack_companion").setup({
+require("dash_paq").setup({
   spec = {
     {
       dir = cmd_dir,
@@ -94,7 +94,7 @@ require("pack_companion").setup({
       cmd = "FixtureCmd",
       config = function()
         vim.api.nvim_create_user_command("FixtureCmd", function(ctx)
-          _G.PACK_COMPANION_CMD_CAPTURE = {
+          _G.DASH_PAQ_CMD_CAPTURE = {
             bang = ctx.bang,
             args = ctx.args,
             mods = ctx.mods,
@@ -126,7 +126,7 @@ require("pack_companion").setup({
       keys = { { "<leader>zz" } }, -- lhs-only: no rhs.
       config = function()
         vim.keymap.set("n", "<leader>zz", function()
-          table.insert(_G.PACK_COMPANION_TEST_LOG, "keysplug-real-mapping-ran")
+          table.insert(_G.DASH_PAQ_TEST_LOG, "keysplug-real-mapping-ran")
         end)
       end,
     },
@@ -154,7 +154,7 @@ require("pack_companion").setup({
       keys = { { "<F6>", ft = "pcfixturelang" } },
       config = function()
         vim.keymap.set("n", "<F6>", function()
-          table.insert(_G.PACK_COMPANION_TEST_LOG, "ftkeysplug-global-mapping-ran")
+          table.insert(_G.DASH_PAQ_TEST_LOG, "ftkeysplug-global-mapping-ran")
         end)
       end,
     },
@@ -228,7 +228,7 @@ require("pack_companion").setup({
 
 t.describe("a deferred cmd-triggered plugin's command is invoked", function()
   t.it("does not source the plugin before the command runs", function()
-    t.assert.falsy(vim.tbl_contains(_G.PACK_COMPANION_TEST_LOG, "cmdplug-loaded"))
+    t.assert.falsy(vim.tbl_contains(_G.DASH_PAQ_TEST_LOG, "cmdplug-loaded"))
   end)
 
   -- Buffer needs >=10 lines for a `5,10` range to be valid.
@@ -236,25 +236,25 @@ t.describe("a deferred cmd-triggered plugin's command is invoked", function()
   vim.cmd("vertical 5,10FixtureCmd! foo bar")
 
   t.it("loads the plugin on first invocation", function()
-    t.assert.truthy(vim.tbl_contains(_G.PACK_COMPANION_TEST_LOG, "cmdplug-loaded"))
+    t.assert.truthy(vim.tbl_contains(_G.DASH_PAQ_TEST_LOG, "cmdplug-loaded"))
   end)
 
   t.it("forwards <bang> to the real command", function()
-    t.assert.truthy(_G.PACK_COMPANION_CMD_CAPTURE ~= nil)
-    t.assert.equals(true, _G.PACK_COMPANION_CMD_CAPTURE.bang)
+    t.assert.truthy(_G.DASH_PAQ_CMD_CAPTURE ~= nil)
+    t.assert.equals(true, _G.DASH_PAQ_CMD_CAPTURE.bang)
   end)
 
   t.it("forwards args to the real command", function()
-    t.assert.equals("foo bar", _G.PACK_COMPANION_CMD_CAPTURE.args)
+    t.assert.equals("foo bar", _G.DASH_PAQ_CMD_CAPTURE.args)
   end)
 
   t.it("forwards <mods> to the real command", function()
-    t.assert.equals("vertical", _G.PACK_COMPANION_CMD_CAPTURE.mods)
+    t.assert.equals("vertical", _G.DASH_PAQ_CMD_CAPTURE.mods)
   end)
 
   t.it("forwards the range to the real command", function()
-    t.assert.equals(5, _G.PACK_COMPANION_CMD_CAPTURE.line1)
-    t.assert.equals(10, _G.PACK_COMPANION_CMD_CAPTURE.line2)
+    t.assert.equals(5, _G.DASH_PAQ_CMD_CAPTURE.line1)
+    t.assert.equals(10, _G.DASH_PAQ_CMD_CAPTURE.line2)
   end)
 end)
 
@@ -263,7 +263,7 @@ t.describe("an event trigger fires and the loaded plugin adds its own handler fo
 
   t.it("loads the deferred plugin exactly once", function()
     local count = 0
-    for _, m in ipairs(_G.PACK_COMPANION_TEST_LOG) do
+    for _, m in ipairs(_G.DASH_PAQ_TEST_LOG) do
       if m == "eventplug-loaded" then
         count = count + 1
       end
@@ -284,11 +284,11 @@ t.describe("a lhs-only `keys` trigger is pressed", function()
   vim.api.nvim_feedkeys(vim.keycode("<leader>zz"), "mtx", false)
 
   t.it("loads the plugin", function()
-    t.assert.truthy(vim.tbl_contains(_G.PACK_COMPANION_TEST_LOG, "keysplug-loaded"))
+    t.assert.truthy(vim.tbl_contains(_G.DASH_PAQ_TEST_LOG, "keysplug-loaded"))
   end)
 
   t.it("replays the lhs so the plugin's real mapping runs", function()
-    t.assert.truthy(vim.tbl_contains(_G.PACK_COMPANION_TEST_LOG, "keysplug-real-mapping-ran"))
+    t.assert.truthy(vim.tbl_contains(_G.DASH_PAQ_TEST_LOG, "keysplug-real-mapping-ran"))
   end)
 end)
 
@@ -309,7 +309,7 @@ t.describe("a BufEnter trigger fires alongside a pre-existing Vimscript autocmd 
   end)
 
   t.it("loads the deferred plugin", function()
-    t.assert.truthy(vim.tbl_contains(_G.PACK_COMPANION_TEST_LOG, "bufplug-loaded"))
+    t.assert.truthy(vim.tbl_contains(_G.DASH_PAQ_TEST_LOG, "bufplug-loaded"))
   end)
 
   t.it("replays the plugin's own patterned `once` handler for the matching buffer", function()
@@ -328,11 +328,11 @@ t.describe("an ft-scoped lhs-only key fires and the plugin maps the lhs globally
   vim.api.nvim_feedkeys(vim.keycode("<F6>"), "mtx", false)
 
   t.it("loads the plugin", function()
-    t.assert.truthy(vim.tbl_contains(_G.PACK_COMPANION_TEST_LOG, "ftkeysplug-loaded"))
+    t.assert.truthy(vim.tbl_contains(_G.DASH_PAQ_TEST_LOG, "ftkeysplug-loaded"))
   end)
 
   t.it("does not let the (deleted) buffer-local stub shadow the plugin's real global mapping", function()
-    t.assert.truthy(vim.tbl_contains(_G.PACK_COMPANION_TEST_LOG, "ftkeysplug-global-mapping-ran"))
+    t.assert.truthy(vim.tbl_contains(_G.DASH_PAQ_TEST_LOG, "ftkeysplug-global-mapping-ran"))
   end)
 end)
 
@@ -341,7 +341,7 @@ t.describe("a lhs-only key fires and the plugin never redefines the lhs", functi
 
   t.it("loads the plugin exactly once without hanging/recursing", function()
     local count = 0
-    for _, m in ipairs(_G.PACK_COMPANION_TEST_LOG) do
+    for _, m in ipairs(_G.DASH_PAQ_TEST_LOG) do
       if m == "unreplacedkeysplug-loaded" then
         count = count + 1
       end
@@ -356,7 +356,7 @@ t.describe("an ft-deferred entry has its own native ftplugin/ and after/ftplugin
   vim.bo[buf1].filetype = "pcftpluginlang"
 
   t.it("loads the plugin on the first matching buffer", function()
-    t.assert.truthy(vim.tbl_contains(_G.PACK_COMPANION_TEST_LOG, "ftpluginplug-loaded"))
+    t.assert.truthy(vim.tbl_contains(_G.DASH_PAQ_TEST_LOG, "ftpluginplug-loaded"))
   end)
 
   t.it("sources ftplugin/ and after/ftplugin/ exactly once for the first buffer", function()
@@ -380,7 +380,7 @@ t.describe("a pattern-matched (non-`User`) event trigger fires", function()
   vim.api.nvim_exec_autocmds("ColorScheme", { pattern = "pcfixturescheme" })
 
   t.it("loads the deferred plugin", function()
-    t.assert.truthy(vim.tbl_contains(_G.PACK_COMPANION_TEST_LOG, "colorschemeplug-loaded"))
+    t.assert.truthy(vim.tbl_contains(_G.DASH_PAQ_TEST_LOG, "colorschemeplug-loaded"))
   end)
 
   t.it("replays the plugin's own pattern-scoped handler via pattern, not buffer", function()
@@ -397,7 +397,7 @@ t.describe("an ft-deferred entry's own ftdetect/ defines its filetype", function
   end)
 
   t.it("loads the entry once its own filetype triggers", function()
-    t.assert.truthy(vim.tbl_contains(_G.PACK_COMPANION_TEST_LOG, "ftdetectdeferplug-loaded"))
+    t.assert.truthy(vim.tbl_contains(_G.DASH_PAQ_TEST_LOG, "ftdetectdeferplug-loaded"))
   end)
 end)
 
@@ -405,7 +405,7 @@ t.describe("a `keys` entry with a string expr rhs is pressed", function()
   vim.api.nvim_feedkeys(vim.keycode("<F7>"), "mtx", false)
 
   t.it("loads the plugin", function()
-    t.assert.truthy(vim.tbl_contains(_G.PACK_COMPANION_TEST_LOG, "exprkeysplug-loaded"))
+    t.assert.truthy(vim.tbl_contains(_G.DASH_PAQ_TEST_LOG, "exprkeysplug-loaded"))
   end)
 
   t.it("evaluates the real expr mapping on the first press, not feed the raw expression text", function()
@@ -430,7 +430,7 @@ t.describe("a `keys` entry with a plain string rhs is pressed and the user has s
   vim.api.nvim_feedkeys(vim.keycode("<F8>"), "mtx", false)
 
   t.it("loads the plugin", function()
-    t.assert.truthy(vim.tbl_contains(_G.PACK_COMPANION_TEST_LOG, "noremapkeysplug-loaded"))
+    t.assert.truthy(vim.tbl_contains(_G.DASH_PAQ_TEST_LOG, "noremapkeysplug-loaded"))
   end)
 
   t.it("runs the rhs as noremap, not the user's j remap", function()
@@ -449,7 +449,7 @@ t.describe("an operator-pending lhs-only `keys` entry is used as `d<key>` on the
   vim.api.nvim_feedkeys(vim.keycode("d<F2>"), "mtx", false)
 
   t.it("loads the plugin", function()
-    t.assert.truthy(vim.tbl_contains(_G.PACK_COMPANION_TEST_LOG, "opkeysplug-loaded"))
+    t.assert.truthy(vim.tbl_contains(_G.DASH_PAQ_TEST_LOG, "opkeysplug-loaded"))
   end)
 
   t.it("has applied the delete on the very first press (operator not cancelled)", function()

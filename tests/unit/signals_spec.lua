@@ -1,5 +1,5 @@
 local t = require("runner")
-local signals = require("pack_companion.dashboard.analysis.signals")
+local signals = require("dash_paq.dashboard.analysis.signals")
 
 t.describe("classifying conventional-commit breaking markers", function()
   t.it("detects an uppercase BREAKING CHANGE footer", function()

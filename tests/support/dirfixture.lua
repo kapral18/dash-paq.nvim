@@ -6,7 +6,7 @@ local function tmp_dir(label)
   counter = counter + 1
   local uv = vim.uv or vim.loop
   local base = (os.getenv("TMPDIR") or "/tmp"):gsub("/+$", "")
-  local dir = string.format("%s/pack-companion-dirfixtures/%d-%d-%s", base, uv.os_getpid(), counter, label or "d")
+  local dir = string.format("%s/dash-paq-dirfixtures/%d-%d-%s", base, uv.os_getpid(), counter, label or "d")
   vim.fn.mkdir(dir, "p")
   return dir
 end
@@ -39,13 +39,13 @@ function M.new(name, files)
   return root
 end
 
--- A `plugin/init.lua` that appends `marker` to the shared `_G.PACK_COMPANION_TEST_LOG` list.
+-- A `plugin/init.lua` that appends `marker` to the shared `_G.DASH_PAQ_TEST_LOG` list.
 function M.marker_plugin_files(marker, extra_files)
   local files = {
     ["plugin/init.lua"] = string.format(
       [[
-_G.PACK_COMPANION_TEST_LOG = _G.PACK_COMPANION_TEST_LOG or {}
-table.insert(_G.PACK_COMPANION_TEST_LOG, %q)
+_G.DASH_PAQ_TEST_LOG = _G.DASH_PAQ_TEST_LOG or {}
+table.insert(_G.DASH_PAQ_TEST_LOG, %q)
 ]],
       marker
     ),

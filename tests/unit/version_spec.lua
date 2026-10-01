@@ -1,5 +1,5 @@
 local t = require("runner")
-local version = require("pack_companion.dashboard.analysis.version")
+local version = require("dash_paq.dashboard.analysis.version")
 
 t.describe("classifying a commit-hash-shaped string", function()
   t.it("accepts a 7+ char hex string", function()

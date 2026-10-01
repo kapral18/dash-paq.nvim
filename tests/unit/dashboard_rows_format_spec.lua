@@ -1,6 +1,6 @@
 local t = require("runner")
-local rows = require("pack_companion.dashboard.ui.rows")
-local fmt = require("pack_companion.dashboard.ui.format")
+local rows = require("dash_paq.dashboard.ui.rows")
+local fmt = require("dash_paq.dashboard.ui.format")
 
 local function ctx(overrides)
   local base = {
@@ -94,6 +94,39 @@ t.describe("counting/listing selection", function()
 
   t.it("lists selected names sorted by the row iteration order", function()
     t.assert.same({ "aaa", "bbb" }, rows.selected_names(c, false))
+  end)
+end)
+
+t.describe("toggling select-all over visible rows", function()
+  t.it("selects every visible row when none are selected", function()
+    local c = ctx()
+    rows.toggle_all_visible(c)
+    t.assert.equals(6, rows.selected_count(c, false))
+  end)
+
+  t.it("selects every visible row when only some are selected", function()
+    local c = ctx({ selected = { aaa = true } })
+    rows.toggle_all_visible(c)
+    t.assert.equals(6, rows.selected_count(c, false))
+  end)
+
+  t.it("deselects every visible row when all are selected", function()
+    local c = ctx()
+    rows.toggle_all_visible(c)
+    rows.toggle_all_visible(c)
+    t.assert.equals(0, rows.selected_count(c, false))
+  end)
+
+  t.it("leaves selection on rows hidden by the filter untouched", function()
+    local c = ctx({ filter_mode = "updates", selected = { aaa = true, bbb = true } })
+    rows.toggle_all_visible(c)
+    t.assert.same({ "aaa" }, rows.selected_names(c, false))
+  end)
+
+  t.it("does nothing when no row is visible", function()
+    local c = ctx({ search_text = "zzz", selected = { aaa = true } })
+    rows.toggle_all_visible(c)
+    t.assert.same({ "aaa" }, rows.selected_names(c, false))
   end)
 end)
 

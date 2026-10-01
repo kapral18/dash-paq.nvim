@@ -11,7 +11,7 @@ local branch = gitfixture.new_remote("branch")
 gitfixture.commit(branch, "feat: initial", { ["README.md"] = "v1" })
 gitfixture.push(branch)
 
-require("pack_companion").setup({
+require("dash_paq").setup({
   spec = {
     { src = tagged.src, name = "tagged", version = "*" }, -- strict-parse tag range
     { src = branch.src, name = "branchplug", version = false }, -- forces branch tracking
@@ -28,11 +28,11 @@ gitfixture.push(tagged)
 gitfixture.commit(branch, "feat: another commit", { ["more.txt"] = "y" })
 gitfixture.push(branch)
 
-local pipeline = require("pack_companion.dashboard.report.pipeline")
-local parser = require("pack_companion.dashboard.report.parser")
-local state = require("pack_companion.dashboard.state")
+local pipeline = require("dash_paq.dashboard.report.pipeline")
+local parser = require("dash_paq.dashboard.report.parser")
+local state = require("dash_paq.dashboard.state")
 
--- 1. Run pack-companion's own pipeline (online) for both plugins.
+-- 1. Run dash-paq's own pipeline (online) for both plugins.
 local pipeline_results = {}
 local pipeline_done = false
 pipeline.run(nil, true, function(result)
@@ -56,7 +56,7 @@ for name, p in pairs(state.pack_report_cache.plugins) do
 end
 
 t.describe("a tag-range ('*') plugin gets a new tag on its remote", function()
-  t.it("is 'update' per pack-companion's own pipeline", function()
+  t.it("is 'update' per dash-paq's own pipeline", function()
     t.assert.truthy(pipeline_results.tagged ~= nil)
     t.assert.equals("update", pipeline_results.tagged.status)
   end)
@@ -67,7 +67,7 @@ t.describe("a tag-range ('*') plugin gets a new tag on its remote", function()
 end)
 
 t.describe("a branch-tracking plugin gets a new commit on its remote", function()
-  t.it("is 'update' per pack-companion's own pipeline", function()
+  t.it("is 'update' per dash-paq's own pipeline", function()
     t.assert.truthy(pipeline_results.branchplug ~= nil)
     t.assert.equals("update", pipeline_results.branchplug.status)
   end)

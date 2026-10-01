@@ -1,15 +1,15 @@
 -- setup() called from a real init.lua, at real Neovim startup (v:vim_did_init == 0, not nvim -l's script mode).
 -- Every plugin/**/after/plugin/** file (src, dir, a plain user plugin/, and a $VIMRUNTIME plugin) must be
--- ...sourced exactly once by VimEnter.
--- Runs a real child `nvim --headless -u <init.lua>` process with its own fresh, isolated XDG_*/stdpath dirs.
+-- sourced exactly once by VimEnter. Runs a real child `nvim --headless -u <init.lua>` process with its own
+-- fresh, isolated XDG_*/stdpath dirs.
 local t = require("runner")
 local gitfixture = require("support.gitfixture")
 local dirfixture = require("support.dirfixture")
 
-local ROOT = _G.PACK_COMPANION_TEST_ROOT
+local ROOT = _G.DASH_PAQ_TEST_ROOT
 
 local function fresh_dir(label)
-  return dirfixture.fresh_dir("pack-companion-real-startup", label)
+  return dirfixture.fresh_dir("dash-paq-real-startup", label)
 end
 
 -- `src` fixture: real git remote with plugin/ + after/plugin/.
@@ -40,7 +40,7 @@ vim.fn.writefile(
 -- pack/*/start/* fixture: installed outside vim.pack entirely, directly under the isolated XDG_DATA_HOME packpath.
 local startpkg_root = vim.fs.joinpath("nvim", "site", "pack", "x", "start", "sp")
 
--- ft-detecting dir fixture, reused below: plugin/, after/plugin/, and ftdetect/.
+-- ft-detecting dir fixture, reused below as a bare `dir` entry and with `cmd`/`keys` triggers.
 local ftdir_root = fresh_dir("ftdirplug")
 vim.fn.mkdir(vim.fs.joinpath(ftdir_root, "ftdetect"), "p")
 vim.fn.writefile(
@@ -49,7 +49,7 @@ vim.fn.writefile(
 )
 
 -- Isolated XDG dirs for the child process. A plugin/ file under the isolated config dir stands in for
--- a user's own plugin/ file, on Neovim's default rtp with no pack_companion involvement.
+-- a user's own plugin/ file, on Neovim's default rtp with no dash_paq involvement.
 local xdg_config = fresh_dir("xdg-config")
 local xdg_data = fresh_dir("xdg-data")
 local xdg_state = fresh_dir("xdg-state")
@@ -104,7 +104,7 @@ local init_lines = {
   "vim.opt.swapfile = false",
   string.format("vim.opt.rtp:prepend(%q)", ROOT),
   "_G.PC_COUNTS = { src_plugin = 0, src_after = 0, dir_plugin = 0, dir_after = 0, user_plugin = 0 }",
-  "require('pack_companion').setup({",
+  "require('dash_paq').setup({",
   "  dashboard = false,",
   "  version_policy = false,",
   "  spec = {",
@@ -212,7 +212,7 @@ vim.fn.writefile({
   "vim.opt.shadafile = 'NONE'",
   "vim.opt.swapfile = false",
   string.format("vim.opt.rtp:prepend(%q)", ROOT),
-  "require('pack_companion').setup({",
+  "require('dash_paq').setup({",
   "  dashboard = false,",
   "  version_policy = false,",
   string.format("  spec = { { dir = %q, name = 'ftdirplug' } },", ftdir_root),
@@ -247,7 +247,7 @@ vim.fn.writefile({
   "vim.opt.shadafile = 'NONE'",
   "vim.opt.swapfile = false",
   string.format("vim.opt.rtp:prepend(%q)", ROOT),
-  "require('pack_companion').setup({",
+  "require('dash_paq').setup({",
   "  dashboard = false,",
   "  version_policy = false,",
   string.format("  spec = { { dir = %q, name = 'ftdirplug' } },", ftdir_root),
@@ -291,7 +291,7 @@ vim.fn.writefile({
   "    end)",
   "  end,",
   "})",
-  "require('pack_companion').setup({",
+  "require('dash_paq').setup({",
   "  dashboard = false,",
   "  version_policy = false,",
   string.format("  spec = { { dir = %q, name = 'badcmdplug', cmd = 'lowercase' } },", ftdir_root),
@@ -313,7 +313,7 @@ vim.fn.writefile({
   "vim.opt.swapfile = false",
   string.format("vim.opt.rtp:prepend(%q)", ROOT),
   "_G.PC_COUNTS = { f9 = 0 }",
-  "require('pack_companion').setup({",
+  "require('dash_paq').setup({",
   "  dashboard = false,",
   "  version_policy = false,",
   string.format(
@@ -360,7 +360,7 @@ vim.fn.writefile({
   "vim.opt.swapfile = false",
   string.format("vim.opt.rtp:prepend(%q)", ROOT),
   "_G.PC_COUNTS = {}",
-  "require('pack_companion').setup({",
+  "require('dash_paq').setup({",
   "  dashboard = false,",
   "  version_policy = false,",
   string.format("  spec = { { dir = %q, name = 'ftdeferinitplug', ft = 'pcdeferinit' } },", ftdeferinit_root),
@@ -417,7 +417,7 @@ vim.fn.writefile({
   string.format("vim.opt.rtp:prepend(%q)", ROOT),
   "vim.filetype.add({ extension = { pcb = 'pcb' } })",
   "_G.PC_COUNTS = {}",
-  "require('pack_companion').setup({",
+  "require('dash_paq').setup({",
   "  dashboard = false,",
   "  version_policy = false,",
   "  spec = {",
@@ -472,7 +472,7 @@ vim.fn.writefile({
   "vim.opt.swapfile = false",
   string.format("vim.opt.rtp:prepend(%q)", ROOT),
   "_G.PC_COUNTS = { bp_build_ran = 0 }",
-  "require('pack_companion').setup({",
+  "require('dash_paq').setup({",
   "  dashboard = false,",
   "  version_policy = false,",
   "  spec = {",
@@ -537,7 +537,7 @@ vim.fn.writefile({
   "vim.opt.swapfile = false",
   string.format("vim.opt.rtp:prepend(%q)", ROOT),
   "_G.PC_ORDER = {}",
-  "require('pack_companion').setup({",
+  "require('dash_paq').setup({",
   "  dashboard = false,",
   "  version_policy = false,",
   "  spec = {",
@@ -625,7 +625,7 @@ vim.fn.writefile({
   string.format("vim.opt.rtp:prepend(%q)", ROOT),
   "_G.PC_COUNTS = {}",
   "_G.PC_AFTER_ORDER = {}",
-  "require('pack_companion').setup({",
+  "require('dash_paq').setup({",
   "  dashboard = false,",
   "  version_policy = false,",
   string.format("  spec = { { dir = %q, name = 'afterorderpc' } },", afterorder_root),
@@ -717,7 +717,7 @@ vim.fn.writefile({
   "vim.opt.swapfile = false",
   string.format("vim.opt.rtp:prepend(%q)", ROOT),
   "_G.PC_COUNTS = {}",
-  "require('pack_companion').setup({",
+  "require('dash_paq').setup({",
   "  dashboard = false,",
   "  version_policy = false,",
   "  spec = {",

@@ -1,5 +1,5 @@
 local t = require("runner")
-local spec_mod = require("pack_companion.loader.spec")
+local spec_mod = require("dash_paq.loader.spec")
 
 t.describe("deriving a source URL from a repo shorthand (repo_to_src)", function()
   t.it("expands owner/repo against the default GitHub host", function()
@@ -349,6 +349,40 @@ t.describe("resolving dev-directory overrides", function()
   t.it("joins dev.path and the plugin name for dev_path_for", function()
     local path = spec_mod.dev_path_for("myplug", { path = "/tmp/code" })
     t.assert.equals("/tmp/code/myplug", path)
+  end)
+
+  t.it("treats a non-empty string spec.dev as a dev entry (a per-plugin base dir)", function()
+    t.assert.truthy(spec_mod.is_dev_entry("x", "/tmp/some/checkout", { path = "~/projects" }))
+  end)
+
+  t.it("treats an empty string spec.dev as never a dev entry", function()
+    t.assert.falsy(spec_mod.is_dev_entry("x", "", { path = "~/projects" }))
+  end)
+end)
+
+t.describe("a spec's string `dev` field sets entry.dev_base (per-plugin dev base dir)", function()
+  t.it("expands and records the per-plugin base on the flattened entry", function()
+    local entries = spec_mod.flatten_specs({}, {
+      { "owner/plug", name = "plug", dev = "/tmp/my-plug-checkout" },
+    }, { dev = { path = "~/projects" } })
+    t.assert.truthy(entries.plug.is_dev)
+    t.assert.equals("/tmp/my-plug-checkout", entries.plug.dev_base)
+  end)
+
+  t.it("a later boolean dev spec reverts dev_base to nil (last explicit dev wins)", function()
+    local entries = spec_mod.flatten_specs({}, {
+      { "owner/plug", name = "plug", dev = "/tmp/my-plug-checkout" },
+      { name = "plug", dev = true },
+    }, { dev = { path = "~/projects" } })
+    t.assert.truthy(entries.plug.is_dev)
+    t.assert.is_nil(entries.plug.dev_base)
+  end)
+
+  t.it("leaves dev_base nil for a plain boolean/pattern dev entry", function()
+    local entries = spec_mod.flatten_specs({}, {
+      { "owner/plug", name = "plug", dev = true },
+    }, { dev = { path = "~/projects" } })
+    t.assert.is_nil(entries.plug.dev_base)
   end)
 end)
 

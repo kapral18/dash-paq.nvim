@@ -1,5 +1,5 @@
 local t = require("runner")
-local config = require("pack_companion.config")
+local config = require("dash_paq.config")
 
 t.describe("opts is missing both spec and modules", function()
   t.it("raises a clear error", function()
@@ -47,6 +47,7 @@ t.describe("dashboard/version_policy/dev are omitted", function()
     t.assert.equals(0.68, resolved.dashboard.width_ratio)
     t.assert.equals(84, resolved.dashboard.min_width)
     t.assert.equals(8, resolved.dashboard.fetch_concurrency)
+    t.assert.equals(4, resolved.dashboard.apply_batch_size)
   end)
 
   t.it("fills in the documented version_policy defaults", function()

@@ -1,0 +1,520 @@
+*dash-paq.txt* Lazy-loading spec layer and update dashboard for vim.pack
+
+                             dash-paq.nvim
+
+CONTENTS                                                   *dash-paq-contents*
+
+  1. Introduction .....................................|dash-paq-introduction|
+  2. Requirements .....................................|dash-paq-requirements|
+  3. Installation .....................................|dash-paq-installation|
+  4. Setup ...................................................|dash-paq-setup|
+  5. Spec fields ..............................................|dash-paq-spec|
+  6. Configuration ..........................................|dash-paq-config|
+  7. Commands .............................................|dash-paq-commands|
+  8. Dashboard keys .................................|dash-paq-dashboard-keys|
+  9. Version policy .................................|dash-paq-version-policy|
+  10. Local development (dev) ..................................|dash-paq-dev|
+  11. Health ................................................|dash-paq-health|
+  12. State files ............................................|dash-paq-state|
+  13. Highlight groups ..................................|dash-paq-highlights|
+  14. Limitations ......................................|dash-paq-limitations|
+  15. Development ......................................|dash-paq-development|
+
+==============================================================================
+1. Introduction                                        *dash-paq-introduction*
+
+Neovim >= 0.12 ships |vim.pack| — install, update, a lockfile — but no
+lazy-loading spec layer, version policy, or update overview.
+dash-paq.nvim adds those three:
+
+  - a lazy.nvim-shaped spec layer (cmd/event/ft/keys, dependencies,
+    init/config/opts, build hooks) resolving to plain |vim.pack.add()|
+    calls;
+  - a tag-vs-branch version policy: release tags or default branch, per
+    plugin;
+  - an interactive dashboard (|:DashPaq|) adding drift, orphan,
+    risky-pin, and breaking-change detection over vim.pack's own report.
+
+Installs/updates/deletes and the lockfile stay |vim.pack|'s own.
+
+==============================================================================
+2. Requirements                                        *dash-paq-requirements*
+
+  - Neovim >= 0.12.4 (tested; |vim.pack| needs only 0.12).
+    `:checkhealth dash_paq` warns below it.
+  - `git` on PATH: install/update (`vim.pack` itself), version-policy/
+    dashboard analysis.
+  - No third-party Lua dependencies.
+
+==============================================================================
+3. Installation                                        *dash-paq-installation*
+
+Bootstrap with |vim.pack.add()| like any plugin, then call
+`setup()`: >lua
+    vim.pack.add({ "https://github.com/kapral18/dash-paq.nvim" })
+
+    require("dash_paq").setup({
+      spec = {
+        "nvim-lua/plenary.nvim",
+      },
+    })
+<
+There is no `plugin/` directory: every command registers inside
+`setup()`, called once from `init.lua`, during startup. It never
+disables 'loadplugins' or takes over the native |load-plugins| step; it
+follows |vim.pack.add()|'s own startup semantics.
+
+`setup()` adds each startup plugin to 'runtimepath', then runs
+`config`/`opts` — so `require()`/`:colorscheme` work — before the native
+"load plugins" step sources `plugin/**` and `after/plugin/**`. A
+deferred (`cmd`/`event`/`ft`/`keys`) plugin loads the lazy.nvim way once
+triggered: `plugin/**`, `config`/`opts`, `after/plugin/**`.
+
+  - Globals a `plugin/` file reads (e.g. `vim.g.loaded_netrw`), other
+    |vim.pack.add()| calls, and 'runtimepath' edits: set them anywhere in
+    `init.lua`; "load plugins" runs after it.
+  - A deferred plugin pulled in early (a startup entry's dependency, or
+    triggered from `init.lua` after `setup()` returns) follows the
+    startup path: 'runtimepath', `config`/`opts`, `plugin/**` left to
+    the native step.
+  - An argv buffer's own event, or a `-c`/`+cmd` startup command,
+    triggers loading like any post-startup trigger — `plugin/**`,
+    `config`/`opts`, `after/plugin/**` immediately. Exception: inside a
+    file Neovim is sourcing, `after/plugin/**` waits for |VimEnter|.
+  - Resetting 'loadplugins', or starting with `--noplugin`, `--clean`,
+    or `-u NONE`, skips `plugin/**` sourcing like a plain
+    |vim.pack.add()|: startup plugins still land on 'runtimepath', run
+    `config`/`opts`.
+  - When a declared plugin's `src` changes between two `setup()` runs,
+    `setup()` deletes the old clone and re-clones it from the new `src`.
+
+==============================================================================
+4. Setup                                                      *dash-paq-setup*
+
+                                                      *dash-paq.setup()*
+`require("dash_paq").setup(opts)` — call exactly once; a second
+call raises a Lua error. `opts` fields:
+
+  `spec`        list of spec tables/strings (see |dash-paq-spec|).
+  `modules`     list of Lua module names, each `require()`d, returning a
+                spec or list of specs; splits config across files
+                instead of one big `spec` list.
+
+At least one of `spec`/`modules` is required; combine both if needed.
+Remaining fields (`dashboard`, `version_policy`, `default_host`,
+`hosts`, and `dev`) are covered in |dash-paq-config|.
+
+==============================================================================
+5. Spec fields                                                 *dash-paq-spec*
+
+Each `spec` entry (or one returned from `modules`) is a string
+(`"owner/repo"`) or a table, lazy.nvim-shaped. Specs resolving to the
+same `name` merge field by field, not "last wins": `src`/`dir` keep the
+first value, `opts` deep-merges, `dependencies`/`cmd`/`event`/`ft`/`keys`
+union, `priority` takes max, `lazy = false` wins over `true`; every
+merged spec's own `init`/`config` runs.
+
+Supported fields:
+
+  `src`/`[1]`      Git source: `owner/repo` (via `default_host`),
+                   `scheme://` URL, `git@...`, or `gh:...`, verbatim.
+  `name`           Explicit name; else `src`'s basename minus `.git`, or
+                   `dir`'s basename.
+  `dir`            Local directory onto 'runtimepath' (load order after
+                   the built-in `site` pack dir) instead of an installed
+                   `vim.pack` clone.
+  `dev`            `true` loads from `dev.path .. "/" .. name` when
+                   present; a string sets a per-plugin base dir instead;
+                   see |dash-paq-dev|.
+  `version`        `false` = branch tip; `"*"` = latest semver tag; a
+                   `^`/`~`/`>`/`<`/`=` range = greatest matching tag;
+                   other string = literal tag/branch/commit; omitted =
+                   version policy decides (|dash-paq-version-policy|).
+  `commit`/`tag`/`branch`
+                   Explicit pin; priority over `version`.
+  `enabled`/`cond` Boolean or function; any false among merged specs
+                   disables it.
+  `optional`       Disabled unless at least one merged spec isn't
+                   `optional`.
+  `dependencies`   `owner/repo` strings or spec tables, loaded before
+                   the entry; cycles silently cut.
+  `init`           `init(spec)`, at setup time, before install.
+  `build`          Function, `":Ex command"` string, or shell command
+                   (`/bin/sh -c`, plugin's path), on `PackChanged`
+                   install/update. A deferred entry loads first so build
+                   acts on the real plugin; during `init.lua` sourcing,
+                   the load and build both queue to run once on
+                   `VimEnter`.
+  `opts`           Table (deep-merged across specs) or `fn(spec, opts)`
+                   returning a replacement table.
+  `config`         `fn(spec, opts)`. With no `config` function,
+                   `setup(opts)` auto-calls, only when a spec supplied
+                   `opts` or `config = true`, on the first of: `name`,
+                   `name` minus one `.nvim`/`.vim`/`nvim-`/`vim-` affix,
+                   or `name` with `-` -> `_` — whichever `require()`s
+                   and has a `setup` function.
+  `keys`           Table, or `fn(spec)` returning a key list; entries: `lhs`/`[1]`,
+                   `rhs`/`[2]`, `mode` (default `"n"`),
+                   `ft`/`desc`/`expr`/`nowait`/`silent`, `noremap`/`remap`,
+                   `enabled`. A known `rhs` becomes a real mapping on
+                   load, any route. `lhs`-only: loads the plugin,
+                   replays `lhs` into its own mapping.
+  `cmd`            String/list of command names, deferring load until
+                   first use; forwards `<bang>`/range/count/`<mods>`/args
+                   to the real command.
+  `event`          String, `{event, pattern}` table, or list; defers load
+                   until fired. After load, only the plugin's own
+                   autocmd group(s) replay: by buffer for a
+                   filename-shaped event, `pattern` for
+                   `User`/`CmdlineEnter`/`ColorScheme`/`OptionSet`/
+                   `ModeChanged` (others by buffer, may not match); no
+                   augroup, no replay.
+  `ft`             String or list of filetypes, deferring load.
+  `lazy`           `false` loads at startup even when triggers are set;
+                   `true` keeps it deferred with no trigger (loadable via
+                   `:DashPaq load` or as a dependency).
+  `priority`       Load order among non-deferred entries (default 50;
+                   higher first; ties keep spec order). Values below 50
+                   are clamped to 50.
+
+In addition to `cmd`/`event`/`ft`/`keys`, a deferred entry also loads
+the first time `require()` misses on a top-level module name it
+provides (`lua/<name>.lua` or `lua/<name>/`) -- e.g.
+`require("local-highlight")` loads a `local-highlight.nvim` entry even
+before its own `event` trigger has fired. This is automatic, not an
+opt-in spec field; a disabled entry is never loaded this way, and
+|:DashPaq-trace| shows the reason as `require:<modname>`.
+
+Unsupported fields                                 *dash-paq-spec-unsupported*
+
+Not read by dash-paq.nvim: `main`/`module` (lazy.nvim's opt-in fields
+for require-triggered loading -- here it's automatic instead, see
+above), `import`/`specs`/`pin`/`submodules`/`url`, and lazy.nvim's
+synthetic `VeryLazy`/`User` startup events (`event = "User"` with your
+own `pattern` still works; lazy.nvim's own firing isn't replicated).
+
+==============================================================================
+6. Configuration                                             *dash-paq-config*
+
+`opts.dashboard`, `opts.version_policy`, `opts.dev` each accept `false`
+to disable, or a table deep-merged over the defaults below.
+
+dashboard                                          *dash-paq-config-dashboard*
+>lua
+    dashboard = {
+      width_ratio = 0.68,       -- window width fraction
+      height_ratio = 0.68,      -- window height fraction
+      min_width = 84,
+      min_height = 18,
+      margin = 6,               -- gap kept to editor edge
+      refresh_on_open = true,   -- refresh online on open
+      ascii = false,            -- true = no Nerd Font glyphs
+      fast_scroll = true,
+      fetch_concurrency = 8,    -- concurrent git fetch jobs
+      apply_batch_size = 4,     -- plugins checked out per blocking update apply
+      skip_risk_confirm = false,  -- skip confirm on risky updates
+      skip_clean_confirm = false, -- skip confirm on orphan cleanup
+    }
+<
+`opts.dashboard = false` disables every dashboard command
+(|dash-paq-commands|) except |:DashPaq-trace|/|:DashPaq-load|/|:DashPaq-toggle-dev|,
+which belong to the loader.
+
+version_policy                                *dash-paq-config-version_policy*
+>lua
+    version_policy = {
+      min_tags = 3,
+      commit_lag_multiplier = 1.5,
+      max_commits_since_tag = 150,
+      sparse_tag_threshold = 30,
+      max_tag_age_days = 180,
+      ttl_days = 3,             -- cache lifetime before recompute
+      avg_window = 6,           -- tags averaged for release size
+      startup_delay_ms = 200,   -- delay before startup refresh
+    }
+<
+See |dash-paq-version-policy| for what each threshold gates.
+`opts.version_policy = false` disables the policy: plugins with no
+explicit `version`/`commit`/`tag`/`branch` track default branch.
+
+default_host / hosts                                   *dash-paq-config-hosts*
+>lua
+    default_host = "https://github.com/", -- for "owner/repo" shorthand
+<
+`hosts` is merged over built-in `github.com`/`codeberg.org` entries
+(both `{ compare = "compare/%s...%s", commit = "commit/%s" }`). Add a
+host (both `compare` and `commit`) for its dashboard diff/commit links;
+an entry missing either field is dropped.
+
+dev                                                      *dash-paq-config-dev*
+See |dash-paq-dev|.
+
+==============================================================================
+7. Commands                                                *dash-paq-commands*
+
+Everything is a subcommand of one command, `:DashPaq`. Subcommand names
+and their arguments complete with <Tab>.
+
+:DashPaq[!]                                                         *:DashPaq*
+Open the dashboard; repeated calls reuse the window. `!` closes an open
+dashboard and reopens it with a fresh scan. `!` is rejected on every
+other subcommand.
+
+:DashPaq sync                                                  *:DashPaq-sync*
+Raw online `vim.pack.update()` report: fetches every remote, refreshes
+the cached report/version policy.
+
+:DashPaq status                                              *:DashPaq-status*
+Raw offline report (`vim.pack.update(nil, { offline = true })`): local
+refs only, no network.
+
+:DashPaq stats                                                *:DashPaq-stats*
+Print last raw update/same/error counters, check timestamps.
+
+:DashPaq trace [plugin]                                       *:DashPaq-trace*
+Shows every enabled entry's load status, load reason, load count, and
+trigger set in a buffer; filters to one plugin by name. `q`/`<Esc>`
+closes it.
+
+:DashPaq load {plugin}                                         *:DashPaq-load*
+Force-load one deferred entry: dependencies, `config`/auto-`setup()`
+(`init` ran at setup time), after/plugin files, as if triggered.
+
+:DashPaq lock info                                             *:DashPaq-lock*
+Show the lockfile path, plugin count, mtime.
+
+:DashPaq lock export {path}
+Copy the live lockfile to `{path}`. `{path}` may contain spaces.
+
+:DashPaq lock import {path}
+Overwrite the live lockfile from `{path}` after validating its JSON
+shape. Restart, or run |:DashPaq-sync|, to apply.
+
+:DashPaq toggle-dev {plugin}                             *:DashPaq-toggle-dev*
+Flip a dev-capable plugin between its upstream `vim.pack` clone and its dev
+checkout, without the dashboard: to `upstream` when it currently uses a dev
+checkout, else to the dev checkout (the base's default, the main
+worktree). It flips from the saved `dev.json` choice, so repeating it
+before a restart toggles back. Warns when there is nothing to switch to
+(no `src` for upstream, or no dev checkout). Takes effect on restart and
+offers one; see |dash-paq-dev-toggle|. Works with `opts.dashboard =
+false`. Completes dev-capable plugin names.
+
+:DashPaq policy-rebuild [plugin]                     *:DashPaq-policy-rebuild*
+Clear and recompute the cached tag/branch heuristic; a plugin name
+rebuilds only it.
+
+Buffer filetypes, e.g. for session-save exclusions: `dashpaq` (dashboard),
+`dashpaq-details` (details popup), `dashpaq-trace` (|:DashPaq-trace|).
+
+==============================================================================
+8. Dashboard keys                                    *dash-paq-dashboard-keys*
+
+Buffer-local to the dashboard window:
+
+  `q`/`<Esc>`      close the dashboard
+  `gg`             jump to the first row
+  `R`              refresh online (fetch)
+  `r`              refresh offline (no fetch)
+  `<Space>`/`x`    toggle selection (row, or visual range)
+  `a`              select all visible; deselect them if all are selected
+  `A`              clear selection
+  `<CR>`           update cursor plugin, if pending
+  `u`              update selected, else cursor, pending
+  `U`              update all visible pending
+  `C`              clean orphans (selected, else all), confirm
+  `V`              heal drift: re-checkout to declared version, offline
+  `o`              open diff URL, fallback repo URL
+  `O`              open repo URL
+  `K`              open the details popup
+  `L`              toggle a dev-capable plugin between upstream and a local
+                   checkout (|dash-paq-dev|); saves the choice and
+                   offers `:restart`
+  `T`              open |:DashPaq-trace| for the row under the cursor
+  `f`              cycle filter: all -> updates -> issues -> selected
+  `s`              cycle sort: status <-> name
+  `/`              search by name substring
+  `c`              clear the search
+  `?`              open the key-reference help popup
+
+Filter/search/sort state persists across sessions (see
+|dash-paq-state|); a saved `selected` filter reopens as `all`.
+Selection is not persisted: it starts empty each time the dashboard opens.
+
+Details popup keys                                     *dash-paq-details-keys*
+`K` opens: one line per pending commit (breaking-change markers), plus
+repo/path/revision metadata.
+
+  `q`/`<Esc>`   close the popup
+  `o`           open the commit under the cursor
+  `O`           open the compare URL for every pending commit
+  `r`           open the plugin repository
+
+Row status values: `update`/`same`/`error`/`unknown`, `orphan`
+(installed, no longer declared), `drift` (checkout no longer matches
+declared version), `risky` (`version = "*"` would pick a non-release
+tag over the latest real release), and `local` (a |dash-paq-dev|
+override, never touched by `vim.pack`).
+
+==============================================================================
+9. Version policy                                    *dash-paq-version-policy*
+
+With no `version`/`commit`/`tag`/`branch`, the version policy decides
+release tags or default branch tip. It caches the decision per plugin
+under |dash-paq-state|, re-evaluating once per `ttl_days` (default
+3), async after startup (`startup_delay_ms` after `VimEnter`, one plugin
+per tick) or sync on |:DashPaq-sync|/|:DashPaq-status|/
+|:DashPaq-policy-rebuild|. A decision takes effect at the next
+startup's `setup()` call, not immediately; the first time a policy is
+generated, dash-paq.nvim notifies "restart to apply tag pins".
+
+No semver-shaped tags always resolves to `branch`. Otherwise four gates
+apply, in order, against commits landed since the latest tag:
+
+  1. Release-history (`min_tags`/`sparse_tag_threshold`): under
+     `min_tags` tags, `branch` only past `sparse_tag_threshold` commits
+     since the last tag.
+  2. Commit-ratio (`commit_lag_multiplier`/`avg_window`): `branch` when
+     commits since the latest tag exceed a recency-weighted average
+     commits-per-release over the last `avg_window` (floor 3) tags,
+     times `commit_lag_multiplier`.
+  3. Tag-age (`max_tag_age_days`): `branch` when the latest tag is older
+     than `max_tag_age_days` and a commit has landed since.
+  4. Absolute-cap (`max_commits_since_tag`): past this many commits
+     since the latest tag, always `branch`.
+
+A `tags` decision resolves to a caret/tilde range from the latest tag
+(`^MAJOR.0` for `MAJOR >= 1`, else `~0.MINOR`), so `vim.pack` resolves
+the greatest matching tag itself on every install/update.
+
+Defaults: |dash-paq-config-version_policy|. Tag parsing is strict
+MAJOR.MINOR.PATCH semver (matching `vim.pack` 0.12.4's own resolution);
+two-part tags like `nvim-0.6` never beat a real `vX.Y.Z` tag.
+
+==============================================================================
+10. Local development (dev)                                     *dash-paq-dev*
+
+`opts.dev` loads a plugin from a local checkout instead of its
+`vim.pack` clone, for iterating on your own plugin.
+>lua
+    dev = {
+      path = "~/projects",   -- base dir; plugin resolves to path .. "/" .. name
+      patterns = {},      -- Lua patterns matched against plugin name
+      fallback = true,    -- fall back to normal src when the dir is missing
+    }
+<
+An entry is a dev entry when `dev = true`, `dev` is a non-empty string, or
+its name matches `dev.patterns`. `dev = false` opts out even when the name
+matches `dev.patterns`.
+
+Base dir: a string `dev` is that path (`~` expanded), overriding
+`dev.path .. "/" .. name` for that one plugin; `dev = true`/a pattern match
+uses `dev.path .. "/" .. name`.
+
+The base is then resolved:
+
+  - Base has its own `.git` dir (a normal clone), or a `.git` *file*
+    (a linked worktree's `gitdir:` pointer) that does not resolve to a bare
+    repo: loads the base itself, as a git work tree.
+  - Base has no `.git` but an immediate child directory does, or its `.git`
+    file resolves to a bare repo (a `.bare`-backed worktree layout: a
+    "container" of worktrees either way): loads the first non-bare
+    `git worktree list` entry (the main worktree).
+  - Base exists and isn't git at all: loads the base itself, unchanged.
+  - Base missing, or an existing directory with no plugin content (none
+    of `lua/`, `plugin/`, `after/`, `ftplugin/`, `colors/`, `doc/`, ...):
+    `fallback = true` (default) warns and loads normally from `src`;
+    `fallback = false` disables the entry with an error. An entry with
+    no `src` is disabled with an error either way.
+
+Either way it loads from that directory onto 'runtimepath', not an
+installed/updated `vim.pack` clone, and the dashboard shows it as `local`.
+`opts.dev = false` disables dev resolution entirely.
+
+Toggling upstream/dev checkouts                          *dash-paq-dev-toggle*
+
+In the dashboard, `L` on a dev-capable plugin's row (see
+|dash-paq-dashboard-keys|) offers every checkout for that plugin:
+`upstream` (only when the spec also has a `src`) plus every worktree of a
+git base, or the base itself for a non-git one. Two choices flip directly;
+three or more open a picker. The choice is saved to `dev.json`
+(|dash-paq-state|) and takes effect on the next `setup()` call — no
+live reload (`vim.pack.add` runs once at startup, and re-sourcing an
+already-loaded plugin's files/config isn't safe in general) — so `L`
+offers a `:restart` afterward. A saved choice is honored only when it names
+one of the base's *current* candidate checkouts; a deleted worktree, a
+plugin whose spec dropped `src`, or an existing directory that no longer
+matches the base's candidates (e.g. after the spec's `dev` base changed) is
+ignored with a warning and falls back to the default above.
+
+|:DashPaq-toggle-dev| does the same flip as a command: upstream <-> the default
+dev checkout. `L` stays the way to pick a specific worktree.
+
+==============================================================================
+11. Health                                                   *dash-paq-health*
+
+`:checkhealth dash_paq` checks:
+
+  - `setup()` has been called.
+  - Neovim >= 0.12.4 (warns below; see |dash-paq-requirements|).
+  - `vim.pack` is available.
+  - `git` is on PATH.
+  - |dash-paq-state| dir exists and is writable.
+
+==============================================================================
+12. State files                                               *dash-paq-state*
+
+Under `stdpath("state") .. "/dash-paq/"`:
+
+  `version_policy.json`   per-plugin strategy, latest tag, reasoning
+                          (schema 3; see |dash-paq-version-policy|).
+  `dashboard_state.json`  last update report (per-plugin status, pending
+                          commits, diff URLs), timestamps/counters,
+                          filter/sort/search state.
+  `dev.json`              saved per-plugin dev choices (name -> "upstream"
+                          or a checkout path); see |dash-paq-dev|.
+
+`vim.pack`'s own lockfile is not written by dash-paq.nvim except
+through |:DashPaq-lock|; dashboard updates and cleans still change it
+through `vim.pack`. It lives at
+`stdpath("config") .. "/nvim-pack-lock.json"`.
+
+==============================================================================
+13. Highlight groups                                     *dash-paq-highlights*
+
+All groups are `default = true` links; any colorscheme can override
+them without `:highlight!`.
+
+  DashPaqTitle            DashPaqStatusOrphan
+  DashPaqFiltered         DashPaqStatusDrift
+  DashPaqProgress         DashPaqStatusRisky
+  DashPaqKey              DashPaqStatusLocal
+  DashPaqMeta             DashPaqRiskBreak
+  DashPaqLabel            DashPaqRiskSafe
+  DashPaqValue            DashPaqRiskUnknown
+  DashPaqBar              DashPaqLink
+  DashPaqRule             DashPaqSelected
+  DashPaqHeader           DashPaqStatusUpdate
+  DashPaqStatusSame       DashPaqStatusError
+  DashPaqStatusUnknown
+
+==============================================================================
+14. Limitations                                         *dash-paq-limitations*
+
+  - `vim.pack` is still experimental; its API can change between
+    releases.
+  - The dashboard calls no private `vim.pack` function; it parses the
+    plain-text report `vim.pack.update()` opens in the
+    `nvim-pack://confirm` scratch buffer. A future format change can
+    silently break parsing until this plugin catches up.
+  - Differences from lazy.nvim: see |dash-paq-spec-unsupported| and
+    the startup model in |dash-paq-installation|.
+
+==============================================================================
+15. Development                                         *dash-paq-development*
+
+  `make test`   run the test suite.
+  `make lint`   run formatting/lint checks.
+
+==============================================================================
+vim:tw=78:ts=8:ft=help:norl:

@@ -3,8 +3,8 @@ doc/tags
 
 # Test-run temp dirs (isolated XDG_*/vim.pack state from tests/minimal_init.lua)
 /.tests/
-pack-companion-tests/
-pack-companion-fixtures/
-pack-companion-dirfixtures/
+dash-paq-tests/
+dash-paq-fixtures/
+dash-paq-dirfixtures/
 
 *.log

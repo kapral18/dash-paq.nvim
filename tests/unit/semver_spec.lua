@@ -1,5 +1,5 @@
 local t = require("runner")
-local semver = require("pack_companion.semver")
+local semver = require("dash_paq.semver")
 
 t.describe("parsing a release tag", function()
   t.it("accepts a strict MAJOR.MINOR.PATCH tag with a leading v", function()

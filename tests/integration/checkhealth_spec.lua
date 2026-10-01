@@ -1,18 +1,18 @@
--- `:checkhealth pack_companion` must run without a Lua error and report the
+-- `:checkhealth dash_paq` must run without a Lua error and report the
 -- expected ok/warn lines for a healthy, already-configured setup.
 local t = require("runner")
 local dirfixture = require("support.dirfixture")
 
 local plug_dir = dirfixture.new("healthplug", dirfixture.marker_plugin_files("healthplug-loaded"))
 
-require("pack_companion").setup({
+require("dash_paq").setup({
   spec = { { dir = plug_dir, name = "healthplug" } },
   dashboard = false,
   version_policy = false,
 })
 
-t.describe(":checkhealth pack_companion runs after setup()", function()
-  local ok, err = pcall(vim.cmd, "silent checkhealth pack_companion")
+t.describe(":checkhealth dash_paq runs after setup()", function()
+  local ok, err = pcall(vim.cmd, "silent checkhealth dash_paq")
 
   t.it("runs without raising a Lua error", function()
     if not ok then

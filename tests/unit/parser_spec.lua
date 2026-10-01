@@ -1,10 +1,10 @@
 -- Fixtures are real Neovim 0.12.4 vim.pack.update confirm buffers.
 local t = require("runner")
-local state = require("pack_companion.dashboard.state")
-local parser = require("pack_companion.dashboard.report.parser")
+local state = require("dash_paq.dashboard.state")
+local parser = require("dash_paq.dashboard.report.parser")
 
 local function fixture_lines(name)
-  local root = _G.PACK_COMPANION_TEST_ROOT
+  local root = _G.DASH_PAQ_TEST_ROOT
   return vim.fn.readfile(vim.fs.joinpath(root, "tests", "fixtures", name))
 end
 

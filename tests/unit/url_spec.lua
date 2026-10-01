@@ -1,18 +1,18 @@
 local t = require("runner")
-local url = require("pack_companion.dashboard.analysis.url")
+local url = require("dash_paq.dashboard.analysis.url")
 
 t.describe("parsing source coordinates from a src string", function()
   t.it("parses a https .git URL", function()
-    local host, owner, repo = url.parse_source_coordinates("https://github.com/kapral18/pack-companion.nvim.git")
+    local host, owner, repo = url.parse_source_coordinates("https://github.com/kapral18/dash-paq.nvim.git")
     t.assert.equals("github.com", host)
     t.assert.equals("kapral18", owner)
-    t.assert.equals("pack-companion.nvim", repo)
+    t.assert.equals("dash-paq.nvim", repo)
   end)
 
   t.it("parses a https URL without a .git suffix", function()
-    local host, owner, repo = url.parse_source_coordinates("https://github.com/kapral18/pack-companion.nvim")
+    local host, owner, repo = url.parse_source_coordinates("https://github.com/kapral18/dash-paq.nvim")
     t.assert.equals("github.com", host)
-    t.assert.equals("pack-companion.nvim", repo)
+    t.assert.equals("dash-paq.nvim", repo)
   end)
 
   t.it("parses a git@ SSH URL", function()

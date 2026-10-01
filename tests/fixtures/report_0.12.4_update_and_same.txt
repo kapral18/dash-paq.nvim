@@ -1,8 +1,8 @@
 # Update ───────────────────────────────────────────────────────────────────────
 
 ## tagged
-Path:            /tmp/pack-companion-tests/data/nvim/site/pack/core/opt/tagged
-Source:          file:///tmp/pack-companion-fixtures/tagged-bare.git
+Path:            /tmp/dash-paq-tests/data/nvim/site/pack/core/opt/tagged
+Source:          file:///tmp/dash-paq-fixtures/tagged-bare.git
 Revision before: 585246c70c959b1179d65c77aae2e259af78e9cd
 Revision after:  556154758d275dd9ea80b306aa2394fcac615ca1 (v1.1.0)
 
@@ -12,6 +12,6 @@ Pending updates:
 # Same ─────────────────────────────────────────────────────────────────────────
 
 ## samestatic
-Path:     /tmp/pack-companion-tests/data/nvim/site/pack/core/opt/samestatic
-Source:   file:///tmp/pack-companion-fixtures/samestatic-bare.git
+Path:     /tmp/dash-paq-tests/data/nvim/site/pack/core/opt/samestatic
+Source:   file:///tmp/dash-paq-fixtures/samestatic-bare.git
 Revision: 6aec41bfec5a91a3c126aa553ce780e8cd52fa35 (main)

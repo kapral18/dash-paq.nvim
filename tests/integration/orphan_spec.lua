@@ -1,4 +1,6 @@
--- A wrong orphan flag lets C delete an active plugin.
+-- An active-but-undeclared plugin must not be flagged orphan; an
+-- installed, inactive, undeclared plugin must be. A wrong flag lets the
+-- clean-orphans key delete an active plugin.
 local t = require("runner")
 local gitfixture = require("support.gitfixture")
 
@@ -26,11 +28,11 @@ local remote = gitfixture.new_remote("bootstrapped")
 gitfixture.commit(remote, "feat: initial", { ["README.md"] = "hello" })
 gitfixture.push(remote)
 
--- Bootstrapped directly (bypassing setup()'s spec list), like a user adding pack-companion.nvim itself.
+-- Bootstrapped directly (bypassing setup()'s spec list), like a user adding dash-paq.nvim itself.
 vim.pack.add({ { src = remote.src, name = "bootstrapped" } }, { confirm = false, load = function() end })
 
-local state = require("pack_companion.dashboard.state")
-local rows = require("pack_companion.dashboard.report.rows")
+local state = require("dash_paq.dashboard.state")
+local rows = require("dash_paq.dashboard.report.rows")
 
 -- Orphan flagging needs a published declared set (rows.lua), so this simulates a run that declared some other plugin.
 state.set_declared_plugin_names({ ["some-other-declared-plugin"] = true })

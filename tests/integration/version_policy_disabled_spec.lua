@@ -9,7 +9,7 @@ gitfixture.tag(remote, "v1.0.0")
 gitfixture.push(remote)
 
 -- Pre-seed the on-disk cache with a strong pin, as if a prior setup() (with the policy enabled) wrote it.
-local policy_dir = vim.fs.joinpath(vim.fn.stdpath("state"), "pack-companion")
+local policy_dir = vim.fs.joinpath(vim.fn.stdpath("state"), "dash-paq")
 local policy_path = vim.fs.joinpath(policy_dir, "version_policy.json")
 vim.fn.mkdir(policy_dir, "p")
 vim.fn.writefile({
@@ -26,7 +26,7 @@ local updateplug = gitfixture.new_remote("updateplug")
 gitfixture.commit(updateplug, "feat: initial", { ["README.md"] = "v1" })
 gitfixture.push(updateplug)
 
-require("pack_companion").setup({
+require("dash_paq").setup({
   spec = {
     { src = remote.src, name = "pinnedplug" },
     { src = updateplug.src, name = "updateplug", version = false },
@@ -48,10 +48,10 @@ t.describe("version_policy = false and a stale cached pin already exists on disk
 end)
 
 t.describe("the `U` op updates a plugin with a pending update", function()
-  local view = require("pack_companion.dashboard.ui.view")
-  local refresh = require("pack_companion.dashboard.ui.refresh")
-  local operations = require("pack_companion.dashboard.ui.operations")
-  local report = require("pack_companion.dashboard.report")
+  local view = require("dash_paq.dashboard.ui.view")
+  local refresh = require("dash_paq.dashboard.ui.refresh")
+  local operations = require("dash_paq.dashboard.ui.operations")
+  local report = require("dash_paq.dashboard.report")
 
   -- Delete the stale pin file so this block observes only what the U op itself does.
   vim.fn.delete(policy_path)
@@ -101,6 +101,38 @@ t.describe("the `U` op updates a plugin with a pending update", function()
 
   t.it("does not write a version_policy.json file", function()
     t.assert.equals(0, vim.fn.filereadable(policy_path))
+  end)
+end)
+
+t.describe(":DashPaq with the dashboard enabled", function()
+  t.it("registers the loader and dashboard subcommands", function()
+    t.assert.same(
+      { "load", "lock", "policy-rebuild", "stats", "status", "sync", "toggle-dev", "trace" },
+      vim.fn.getcompletion("DashPaq ", "cmdline")
+    )
+  end)
+
+  t.it("completes lock actions", function()
+    t.assert.same({ "export", "import", "info" }, vim.fn.getcompletion("DashPaq lock ", "cmdline"))
+  end)
+
+  t.it("exports the lockfile to a path containing a space", function()
+    local dest = vim.fs.joinpath(vim.fn.stdpath("state"), "lock export", "lock.json")
+    vim.cmd("DashPaq lock export " .. dest)
+    t.assert.equals(1, vim.fn.filereadable(dest))
+  end)
+
+  t.it("reaches policy-rebuild, which warns while the policy is disabled", function()
+    local notes = {}
+    local orig = vim.notify
+    vim.notify = function(msg, level)
+      notes[#notes + 1] = { msg = msg, level = level }
+    end
+    vim.cmd("DashPaq policy-rebuild")
+    vim.notify = orig
+    t.assert.equals(1, #notes)
+    t.assert.equals(vim.log.levels.WARN, notes[1].level)
+    t.assert.match("Version policy is disabled", notes[1].msg)
   end)
 end)
 

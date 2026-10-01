@@ -11,7 +11,7 @@ local ROOT = repo_root()
 
 local function tmp_base()
   local base = (os.getenv("TMPDIR") or "/tmp"):gsub("/+$", "")
-  return string.format("%s/pack-companion-tests/%d-%d", base, uv.os_getpid(), math.floor(uv.hrtime()))
+  return string.format("%s/dash-paq-tests/%d-%d", base, uv.os_getpid(), math.floor(uv.hrtime()))
 end
 
 local TMP = tmp_base()
@@ -41,7 +41,7 @@ package.path = ROOT .. "/tests/?.lua;" .. ROOT .. "/tests/?/init.lua;" .. packag
 
 vim.opt.swapfile = false
 vim.opt.shadafile = "NONE"
-vim.opt.loadplugins = true -- pack-companion must not require this to be false.
+vim.opt.loadplugins = true -- dash-paq must not require this to be false.
 
-_G.PACK_COMPANION_TEST_ROOT = ROOT
-_G.PACK_COMPANION_TEST_TMP = TMP
+_G.DASH_PAQ_TEST_ROOT = ROOT
+_G.DASH_PAQ_TEST_TMP = TMP

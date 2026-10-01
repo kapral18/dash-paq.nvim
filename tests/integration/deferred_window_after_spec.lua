@@ -6,10 +6,10 @@ local t = require("runner")
 local gitfixture = require("support.gitfixture")
 local dirfixture = require("support.dirfixture")
 
-local ROOT = _G.PACK_COMPANION_TEST_ROOT
+local ROOT = _G.DASH_PAQ_TEST_ROOT
 
 local function fresh_dir(label)
-  return dirfixture.fresh_dir("pack-companion-deferwin", label)
+  return dirfixture.fresh_dir("dash-paq-deferwin", label)
 end
 
 -- ft-deferred dir entry: trigger fires from the argv .lua file's native FileType event, before VimEnter.
@@ -115,7 +115,7 @@ local init_lines = {
   "vim.opt.swapfile = false",
   string.format("vim.opt.rtp:prepend(%q)", ROOT),
   "_G.PC = { counts = {} }",
-  "require('pack_companion').setup({",
+  "require('dash_paq').setup({",
   "  dashboard = false,",
   "  version_policy = false,",
   "  spec = {",
@@ -241,7 +241,7 @@ local cmdwindow_init_lines = {
   "vim.opt.swapfile = false",
   string.format("vim.opt.rtp:prepend(%q)", ROOT),
   "_G.PC_AFTER_RAN = false",
-  "require('pack_companion').setup({",
+  "require('dash_paq').setup({",
   "  dashboard = false,",
   "  version_policy = false,",
   "  spec = {",

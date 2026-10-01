@@ -4,9 +4,9 @@ local M = {}
 
 local GIT_IDENTITY = {
   "-c",
-  "user.name=pack-companion-tests",
+  "user.name=dash-paq-tests",
   "-c",
-  "user.email=tests@pack-companion.invalid",
+  "user.email=tests@dash-paq.invalid",
   "-c",
   "commit.gpgsign=false",
   "-c",
@@ -34,12 +34,16 @@ local function tmp_dir(label)
   counter = counter + 1
   local uv = vim.uv or vim.loop
   local base = (os.getenv("TMPDIR") or "/tmp"):gsub("/+$", "")
-  local dir = string.format("%s/pack-companion-fixtures/%d-%d-%s", base, uv.os_getpid(), counter, label or "d")
+  local dir = string.format("%s/dash-paq-fixtures/%d-%d-%s", base, uv.os_getpid(), counter, label or "d")
   vim.fn.mkdir(dir, "p")
   return dir
 end
 
 M.tmp_dir = tmp_dir
+
+-- Exposes the internal git runner for fixture code that needs a git
+-- subcommand beyond this module's own helpers (e.g. `checkout`, `worktree`).
+M.run = run
 
 -- Creates a bare remote + working checkout on a pinned "main" branch (never
 -- relies on the host's `init.defaultBranch`). Returns `{ bare, work, src }`.
@@ -75,6 +79,37 @@ function M.commit(remote, message, files)
   run(args)
 
   return run({ "git", "-C", remote.work, "rev-parse", "HEAD" })
+end
+
+-- Checks out (creating/resetting) `branch` in `remote.work`, then writes and
+-- commits `files` on it (same shape as `M.commit`), giving a second worktree
+-- branch its own distinguishable content.
+function M.commit_on_branch(remote, branch, message, files)
+  local args = { "git", "-C", remote.work }
+  vim.list_extend(args, GIT_IDENTITY)
+  vim.list_extend(args, { "checkout", "-B", branch })
+  run(args)
+  return M.commit(remote, message, files)
+end
+
+-- Checks out `branch` in `remote.work` (the main worktree), e.g. to free it
+-- up before `M.add_worktree` checks that same branch out elsewhere.
+function M.checkout(remote, branch)
+  local args = { "git", "-C", remote.work }
+  vim.list_extend(args, GIT_IDENTITY)
+  vim.list_extend(args, { "checkout", branch })
+  run(args)
+end
+
+-- Adds a linked worktree for an already-existing `branch` at `path` (must
+-- not be checked out anywhere else already, e.g. call `M.checkout` on the
+-- main worktree first if it's currently on `branch`).
+function M.add_worktree(remote, path, branch)
+  local args = { "git", "-C", remote.work }
+  vim.list_extend(args, GIT_IDENTITY)
+  vim.list_extend(args, { "worktree", "add", path, branch })
+  run(args)
+  return path
 end
 
 function M.tag(remote, tag_name)

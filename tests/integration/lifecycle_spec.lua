@@ -1,14 +1,14 @@
 -- The loader lifecycle's route x kind matrix: every way an entry can load (startup, a dependency, a cmd/key/
--- event/ft trigger, :PackLoad, a build hook, or a trigger during init.lua after setup() returned), for both a
+-- event/ft trigger, :DashPaq load, a build hook, or a trigger during init.lua after setup() returned), for both a
 -- src (git) and a dir entry, against one real `nvim --headless -u <init.lua>` startup with isolated XDG/HOME.
 local t = require("runner")
 local gitfixture = require("support.gitfixture")
 local dirfixture = require("support.dirfixture")
 
-local ROOT = _G.PACK_COMPANION_TEST_ROOT
+local ROOT = _G.DASH_PAQ_TEST_ROOT
 
 local function fresh_dir(label)
-  return dirfixture.fresh_dir("pack-companion-lifecycle", label)
+  return dirfixture.fresh_dir("dash-paq-lifecycle", label)
 end
 
 -- src fixtures (real local git remotes, no network).
@@ -189,7 +189,7 @@ local init_lines = {
   "_G.PC = { counts = {}, log = {}, checks = {} }",
   [[_G.PC_EXPR = function() _G.PC.counts.f3_expr = (_G.PC.counts.f3_expr or 0) + 1 return "" end]],
   "vim.filetype.add({ extension = { lcft2 = 'lcft2' } })",
-  "require('pack_companion').setup({",
+  "require('dash_paq').setup({",
   "  dashboard = false,",
   "  version_policy = false,",
   "  spec = {",
@@ -275,7 +275,7 @@ local init_lines = {
   ),
   -- lhs-only key, no config: the replay must not recurse into a stub that should already be gone.
   string.format("    { dir = %q, name = 'lc_unreplacedkeytrig', keys = { { '<F30>' } } },", unreplacedkeytrig_dir),
-  -- `:PackLoad` only (no other trigger at all).
+  -- `:DashPaq load` only (no other trigger at all).
   string.format("    { dir = %q, name = 'lc_packloadtrig', lazy = true },", packloadtrig_dir),
   -- Deferred cmd + build, first install (mason-shaped).
   string.format(
@@ -352,8 +352,8 @@ local init_lines = {
   "    vim.bo[ftbuf2].filetype = 'lcft2'",
   "    _G.PC.checks.f9_mapped_buf2 = vim.fn.maparg('<F9>', 'n', false, true).callback ~= nil",
   "    press('<F9>')",
-  -- `:PackLoad`.
-  "    vim.cmd('PackLoad lc_packloadtrig')",
+  -- `:DashPaq load`.
+  "    vim.cmd('DashPaq load lc_packloadtrig')",
   -- Build already ran (queued to this VimEnter); confirm the real Ms command still works afterward.
   "    _G.PC.checks.ms_exists_before_manual_call = vim.fn.exists(':LcMs')",
   "    vim.cmd('LcMs')",
@@ -422,7 +422,7 @@ t.describe("plugin/** and after/plugin/** are sourced exactly once, every route"
   t.it("sources the ft-key entry's plugin/** once", function()
     t.assert.equals(1, r.counts.ftkeytrig_plugin)
   end)
-  t.it("sources the :PackLoad entry's plugin/** once", function()
+  t.it("sources the :DashPaq load entry's plugin/** once", function()
     t.assert.equals(1, r.counts.packloadtrig_plugin)
   end)
   t.it("sources the build startup entry's plugin/** once", function()
@@ -489,7 +489,7 @@ t.describe("no stub remains after load; real commands/keys work on every route",
   t.it("runs the ft-scoped key's rhs in both the loading buffer and a later buffer", function()
     t.assert.equals(2, r.counts.f9)
   end)
-  t.it("loads and configures the :PackLoad entry", function()
+  t.it("loads and configures the :DashPaq load entry", function()
     t.assert.equals(1, r.counts.packloadtrig_plugin)
   end)
   t.it("has the build entry's real Ms command defined before it is manually invoked", function()

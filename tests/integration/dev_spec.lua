@@ -2,7 +2,7 @@
 local t = require("runner")
 local dirfixture = require("support.dirfixture")
 
-_G.PACK_COMPANION_TEST_LOG = {}
+_G.DASH_PAQ_TEST_LOG = {}
 
 local dev_root = dirfixture.tmp_dir("dev-root")
 local plugin_dir = vim.fs.joinpath(dev_root, "devplug")
@@ -12,7 +12,7 @@ vim.fn.writefile(
   vim.fs.joinpath(plugin_dir, "plugin", "init.lua")
 )
 
-require("pack_companion").setup({
+require("dash_paq").setup({
   spec = {
     -- `src` is a decoy: dev = true must resolve to the local directory first, never reaching it.
     { src = "https://example.invalid/owner/devplug.git", name = "devplug", dev = true },
@@ -24,7 +24,7 @@ require("pack_companion").setup({
 
 t.describe("a spec matches dev = true and its local dev directory exists", function()
   t.it("loads the plugin from the local dev directory at startup", function()
-    t.assert.truthy(vim.tbl_contains(_G.PACK_COMPANION_TEST_LOG, "devplug-loaded"))
+    t.assert.truthy(vim.tbl_contains(_G.DASH_PAQ_TEST_LOG, "devplug-loaded"))
   end)
 
   t.it("puts the dev directory on 'runtimepath'", function()

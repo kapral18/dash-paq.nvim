@@ -1,0 +1,414 @@
+-- Dev-checkout resolution: per-plugin base dir, git worktree/container
+-- detection, and the persisted per-plugin dev choice
+-- (stdpath("state")/dash-paq/dev.json). Kept separate from
+-- loader/spec.lua so the git/filesystem probing here stays unit-testable on
+-- its own, without pulling in the full spec-flattening machinery.
+local M = {}
+
+local spec_mod = require("dash_paq.loader.spec")
+
+-- The per-plugin base dir a dev entry resolves against: `entry.dev_base`
+-- (set by loader/spec.lua when `spec.dev` is a string) if present, else the
+-- shared `dev.path/<name>` convention.
+function M.base_dir_for(entry, dev_cfg)
+  if type(entry.dev_base) == "string" and entry.dev_base ~= "" then
+    return entry.dev_base
+  end
+  return spec_mod.dev_path_for(entry.name, dev_cfg)
+end
+
+-- Resolves symlinks/`..`/trailing slashes so paths compared or stored below
+-- (candidates, default dirs, active dirs, saved choices) are stable
+-- regardless of how they were spelled (macOS's `/tmp` -> `/private/tmp`, a
+-- symlinked checkout, a saved `dev = "~/code/foo/"`). Falls back to
+-- `vim.fs.normalize` for a path that doesn't exist (`fs_realpath` needs a
+-- real target); mirrors loader/triggers.lua's `normalized_real_path`.
+local function normalize_path(path)
+  if type(path) ~= "string" or path == "" then
+    return path
+  end
+  local real = vim.uv.fs_realpath(path)
+  return vim.fs.normalize(real or path)
+end
+
+M.normalize_path = normalize_path
+
+-- Env used for every git shell-out below: clears `GIT_DIR`/`GIT_WORK_TREE`/
+-- `GIT_INDEX_FILE` so a caller's own git-repo env vars (a bare-dotfiles
+-- setup, or nvim spawned from a git process) never redirect these calls,
+-- mirroring dashboard/report/pipeline.lua's `clean_env` (and upstream
+-- vim.pack's `git_cmd`).
+local function clean_env()
+  local env = vim.fn.environ()
+  env.GIT_DIR = nil
+  env.GIT_WORK_TREE = nil
+  env.GIT_INDEX_FILE = nil
+  return env
+end
+
+-- Runs a git subcommand in `cwd` with a clean git env (above) and never
+-- raising: a missing `git` binary (ENOENT) is caught by `pcall` rather than
+-- aborting `setup()`. Returns the `vim.system` result, or nil on any
+-- failure to even launch the process.
+local function run_git(args, cwd)
+  local cmd = { "git" }
+  vim.list_extend(cmd, args)
+  local ok, result = pcall(function()
+    return vim.system(cmd, { cwd = cwd, text = true, env = clean_env(), clear_env = true }):wait()
+  end)
+  if not ok then
+    return nil
+  end
+  return result
+end
+
+-- True when `base` (whose `.git` is a file, i.e. a `gitdir:` pointer) itself
+-- resolves to a bare repository, as with a `.bare`-backed worktree
+-- container (`base/.bare` + `base/.git` -> `gitdir: ./.bare`). False on any
+-- git failure (missing binary, not a repo at all), so an ordinary linked
+-- worktree's pointer file keeps classifying as "worktree" below.
+function M.is_bare_repo(base)
+  local result = run_git({ "rev-parse", "--is-bare-repository" }, base)
+  if not result or result.code ~= 0 then
+    return false
+  end
+  return vim.trim(result.stdout or "") == "true"
+end
+
+-- True when `path/.git` exists, as a directory (a normal clone/worktree
+-- root) or a file (a linked worktree's `gitdir:` pointer).
+function M.is_git_dir(path)
+  if type(path) ~= "string" or path == "" then
+    return false
+  end
+  local stat = vim.uv.fs_stat(vim.fs.joinpath(path, ".git"))
+  return stat ~= nil and (stat.type == "directory" or stat.type == "file")
+end
+
+-- The first immediate child directory of `path` (name order) that is itself
+-- a git dir, or nil. `path` itself must not already be a git dir.
+function M.container_child(path)
+  if type(path) ~= "string" or path == "" or M.is_git_dir(path) then
+    return nil
+  end
+  local ok, entries = pcall(vim.fn.readdir, path)
+  if not ok or type(entries) ~= "table" then
+    return nil
+  end
+  table.sort(entries)
+  for _, name in ipairs(entries) do
+    local child = vim.fs.joinpath(path, name)
+    if vim.fn.isdirectory(child) == 1 and M.is_git_dir(child) then
+      return child
+    end
+  end
+  return nil
+end
+
+-- Classifies a dev base dir: "worktree" (`base` itself is a checkout: a
+-- `.git` dir, or a `.git` file whose target isn't bare), "container" (`base`
+-- isn't a checkout but either has one as an immediate child, or its `.git`
+-- file resolves to a bare repo, as with a `.bare`-backed worktree layout),
+-- "plain" (an existing non-git directory), or "missing" (not a directory at
+-- all). Returns `kind, git_dir`, where `git_dir` is the path `git worktree
+-- list` should run against (nil for "plain"/"missing").
+function M.classify_base(base)
+  if type(base) ~= "string" or base == "" or vim.fn.isdirectory(base) ~= 1 then
+    return "missing", nil
+  end
+  local git_stat = vim.uv.fs_stat(vim.fs.joinpath(base, ".git"))
+  if git_stat then
+    if git_stat.type == "directory" then
+      return "worktree", base
+    end
+    if git_stat.type == "file" then
+      -- A `.git` *file* either points at a normal linked worktree (base is
+      -- itself a checkout) or, for a `.bare`-backed layout, at a bare repo
+      -- (base is a container: git commands still resolve fine with cwd =
+      -- base, but base has no working files of its own).
+      if M.is_bare_repo(base) then
+        return "container", base
+      end
+      return "worktree", base
+    end
+  end
+  local child = M.container_child(base)
+  if child then
+    return "container", child
+  end
+  return "plain", nil
+end
+
+-- Human label for one worktree entry: "<branch>  <path>", "@<short-head>
+-- <path>" when detached, or the bare path when neither is known (a plain,
+-- non-git candidate).
+local function candidate_label(entry)
+  if type(entry.branch) == "string" and entry.branch ~= "" then
+    return string.format("%s  %s", entry.branch, entry.path)
+  end
+  if type(entry.head) == "string" and not entry.head:match("^0+$") then
+    return string.format("@%s  %s", entry.head:sub(1, 8), entry.path)
+  end
+  return entry.path
+end
+
+-- Pure parser for `git worktree list --porcelain` output: one entry per
+-- `worktree <path>` block (blocks are blank-line separated), with
+-- `head`/`branch`/`bare`/`detached`/`locked`/`prunable` fields as present.
+-- No filesystem or git I/O; callers filter by existence/bare-ness.
+function M.parse_worktree_porcelain(output)
+  local entries = {}
+  local current = nil
+  for _, line in ipairs(vim.split(output or "", "\n", { trimempty = false })) do
+    if line == "" then
+      current = nil
+    elseif line:match("^worktree ") then
+      current = { path = line:sub(#"worktree " + 1) }
+      entries[#entries + 1] = current
+    elseif current then
+      if line == "bare" then
+        current.bare = true
+      elseif line == "detached" then
+        current.detached = true
+      elseif line:match("^branch ") then
+        current.branch = line:sub(#"branch " + 1):gsub("^refs/heads/", "")
+      elseif line:match("^HEAD ") then
+        current.head = line:sub(#"HEAD " + 1)
+      elseif line:match("^locked") then
+        current.locked = true
+      elseif line:match("^prunable") then
+        current.prunable = true
+      end
+    end
+  end
+  return entries
+end
+
+-- Runs `git worktree list --porcelain` against `git_dir` (with a clean git
+-- env) and returns the existing, non-bare worktrees (main worktree
+-- first, as git reports them), each with a normalized `path` and a
+-- ready `label` for `vim.ui.select`. Empty on any git failure, including a
+-- missing `git` binary.
+function M.list_worktrees(git_dir)
+  local result = run_git({ "worktree", "list", "--porcelain" }, git_dir)
+  if not result or result.code ~= 0 then
+    return {}
+  end
+  local out = {}
+  for _, entry in ipairs(M.parse_worktree_porcelain(result.stdout)) do
+    if not entry.bare and type(entry.path) == "string" and entry.path ~= "" and vim.fn.isdirectory(entry.path) == 1 then
+      entry.path = normalize_path(entry.path)
+      entry.label = candidate_label(entry)
+      out[#out + 1] = entry
+    end
+  end
+  return out
+end
+
+-- Candidate checkout dirs for `base`: `git worktree list` entries for a
+-- "worktree"/"container" base, or a single `{path, label}` candidate for a
+-- "plain" existing directory. Empty when `base` is missing.
+function M.candidates_for(base)
+  local kind, git_dir = M.classify_base(base)
+  if kind == "missing" then
+    return {}, kind
+  end
+  if kind == "plain" then
+    local normalized = normalize_path(base)
+    return { { path = normalized, label = normalized } }, kind
+  end
+  return M.list_worktrees(git_dir), kind
+end
+
+-- Runtime subdirectories Neovim sources from a plugin root. A dev dir holding
+-- none of them is not a plugin checkout (an empty or unrelated directory).
+local PLUGIN_DIRS = {
+  "lua",
+  "plugin",
+  "after",
+  "autoload",
+  "colors",
+  "compiler",
+  "doc",
+  "ftdetect",
+  "ftplugin",
+  "indent",
+  "keymap",
+  "lsp",
+  "queries",
+  "rplugin",
+  "syntax",
+}
+
+-- True when `path` is a directory with at least one runtime subdirectory.
+function M.is_plugin_dir(path)
+  if type(path) ~= "string" or path == "" then
+    return false
+  end
+  for _, name in ipairs(PLUGIN_DIRS) do
+    if vim.fn.isdirectory(vim.fs.joinpath(path, name)) == 1 then
+      return true
+    end
+  end
+  return false
+end
+
+-- The dev dir to use when no saved choice (or an invalid one) applies.
+-- "worktree"/"plain": `base` itself, as spelled. "container": the first
+-- non-bare worktree of its git child/self. nil when `base` doesn't exist.
+function M.default_dir(base)
+  local kind, git_dir = M.classify_base(base)
+  if kind == "missing" then
+    return nil
+  end
+  if kind == "container" then
+    local worktrees = M.list_worktrees(git_dir)
+    return worktrees[1] and worktrees[1].path or nil
+  end
+  -- Loaded as spelled (only `~` expanded) so the rtp entry matches the
+  -- configured path; comparisons normalize separately.
+  return vim.fn.expand(base)
+end
+
+-- A saved path choice for a dev-capable entry is honored
+-- only when it names -- after normalization -- one of `base`'s *current*
+-- candidate checkouts, not merely any existing directory. This stops a
+-- stale `L`-toggle choice from silently overriding a base that a spec
+-- change has since pointed elsewhere. Returns the matching candidate's
+-- normalized path, or nil when `choice` doesn't match any candidate.
+function M.matching_candidate_path(base, choice)
+  local normalized_choice = normalize_path(choice)
+  if type(normalized_choice) ~= "string" or normalized_choice == "" then
+    return nil
+  end
+  for _, candidate in ipairs(M.candidates_for(base)) do
+    if candidate.path == normalized_choice then
+      return candidate.path
+    end
+  end
+  return nil
+end
+
+local function choices_path()
+  return vim.fs.joinpath(vim.fn.stdpath("state"), "dash-paq", "dev.json")
+end
+
+M.choices_path = choices_path
+
+local function ensure_state_dir()
+  local dir = vim.fs.dirname(choices_path())
+  if vim.fn.isdirectory(dir) ~= 1 then
+    pcall(vim.fn.mkdir, dir, "p")
+  end
+end
+
+-- Reads the saved per-plugin dev choices (name -> "upstream" | absolute
+-- path). Tolerates a missing or corrupt file: both return an empty table.
+function M.load_choices()
+  local path = choices_path()
+  if vim.fn.filereadable(path) ~= 1 then
+    return {}
+  end
+  local ok_read, lines = pcall(vim.fn.readfile, path)
+  if not ok_read or type(lines) ~= "table" then
+    return {}
+  end
+  local ok_decode, decoded = pcall(vim.json.decode, table.concat(lines, "\n"))
+  if not ok_decode or type(decoded) ~= "table" then
+    return {}
+  end
+  local out = {}
+  for name, value in pairs(decoded) do
+    if type(name) == "string" and name ~= "" and type(value) == "string" and value ~= "" then
+      out[name] = value
+    end
+  end
+  return out
+end
+
+-- Overwrites the saved choices file with `choices` (name -> "upstream" |
+-- absolute path). Returns true on success.
+function M.save_choices(choices)
+  ensure_state_dir()
+  local ok_json, encoded = pcall(vim.json.encode, type(choices) == "table" and choices or {})
+  if not ok_json or type(encoded) ~= "string" then
+    return false
+  end
+  local ok_write = pcall(vim.fn.writefile, { encoded }, choices_path())
+  return ok_write and true or false
+end
+
+-- What a toggle should switch `base`'s plugin to: "upstream" when it currently
+-- uses a dev checkout, else the dev checkout (`default_dir`). `choice` is the
+-- saved dev.json value (the pending state: no live reload), `has_src` whether
+-- an upstream clone exists to fall back to. Mirrors how the loader resolves a
+-- choice: "upstream" counts only with a `src`; a path only while it names a
+-- current candidate; anything else means the default dir (when it exists).
+-- Returns the target ("upstream" | absolute path), or nil plus a reason.
+function M.toggle_target(base, has_src, choice)
+  local default = M.default_dir(base)
+  local not_plugin = default ~= nil and not M.is_plugin_dir(default)
+  if not_plugin then
+    default = nil
+  end
+  local on_dev
+  if choice == "upstream" and has_src then
+    on_dev = false
+  elseif type(choice) == "string" and choice ~= "upstream" then
+    local matched = M.matching_candidate_path(base, choice)
+    on_dev = matched ~= nil and M.is_plugin_dir(matched)
+    if not on_dev then
+      on_dev = default ~= nil
+    end
+  else
+    on_dev = default ~= nil
+  end
+  if on_dev then
+    if not has_src then
+      return nil, "no upstream (src) to switch to"
+    end
+    return "upstream"
+  end
+  if not default then
+    if not_plugin then
+      return nil, tostring(base) .. " is not a plugin directory"
+    end
+    return nil, "no dev checkout found at " .. tostring(base)
+  end
+  return M.matching_candidate_path(base, default) or default
+end
+
+-- Saves `name`'s dev choice ("upstream" or an absolute path) to dev.json, then
+-- offers a `:restart` (no live reload: a restart is the only clean switch) via
+-- `vim.fn.confirm`. A failed write is reported with an ERROR notify and skips
+-- the restart prompt, since restarting would apply nothing. Returns whether
+-- the choice was saved. `hooks` (confirm/restart) let tests stub the UI;
+-- `hooks.from` optionally names what the plugin switches away from, shown in
+-- the prompt.
+function M.set_choice(name, target, hooks)
+  hooks = hooks or {}
+  local confirm_fn = hooks.confirm or vim.fn.confirm
+  local restart_fn = hooks.restart or function()
+    vim.cmd("restart")
+  end
+
+  local choices = M.load_choices()
+  choices[name] = target
+  if not M.save_choices(choices) then
+    vim.notify(name .. ": failed to save dev choice to " .. choices_path(), vim.log.levels.ERROR)
+    return false
+  end
+  local label = target == "upstream" and "upstream (vim.pack clone)" or target
+  local change = hooks.from and string.format("switching from %s to %s", hooks.from, label)
+    or string.format("switching to %s", label)
+  local msg = string.format("%s: %s.\nRestart now to apply? [y/N] ", name, change)
+  if confirm_fn(msg, "&Yes\n&No", 2) == 1 then
+    local ok, err = pcall(restart_fn)
+    if not ok then
+      vim.notify("Restart failed: " .. tostring(err), vim.log.levels.ERROR)
+    end
+  end
+  return true
+end
+
+return M

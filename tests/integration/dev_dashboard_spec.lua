@@ -4,7 +4,7 @@ local t = require("runner")
 local dirfixture = require("support.dirfixture")
 local gitfixture = require("support.gitfixture")
 
-_G.PACK_COMPANION_TEST_LOG = {}
+_G.DASH_PAQ_TEST_LOG = {}
 
 local dev_root = dirfixture.tmp_dir("dev-dashboard-root")
 local plugin_dir = vim.fs.joinpath(dev_root, "devplug")
@@ -35,7 +35,7 @@ local real_remote = gitfixture.new_remote("realplug")
 gitfixture.commit(real_remote, "feat: initial", { ["README.md"] = "v1" })
 gitfixture.push(real_remote)
 
-require("pack_companion").setup({
+require("dash_paq").setup({
   spec = {
     { src = remote.src, name = "devplug", dev = true },
     { src = "https://example.invalid/dev2plug", name = "dev2plug", dev = true },
@@ -46,7 +46,7 @@ require("pack_companion").setup({
   dev = { path = dev_root, patterns = {}, fallback = true },
 })
 
-local report = require("pack_companion.dashboard.report")
+local report = require("dash_paq.dashboard.report")
 
 t.describe("a dev entry's local directory has an after/plugin/**", function()
   t.it("puts {dir}/after on 'runtimepath' (same as :packadd would)", function()
@@ -54,7 +54,7 @@ t.describe("a dev entry's local directory has an after/plugin/**", function()
   end)
 
   t.it("sources its after/plugin/** at startup", function()
-    t.assert.truthy(vim.tbl_contains(_G.PACK_COMPANION_TEST_LOG, "devplug-after-loaded"))
+    t.assert.truthy(vim.tbl_contains(_G.DASH_PAQ_TEST_LOG, "devplug-after-loaded"))
   end)
 end)
 
@@ -77,9 +77,9 @@ t.describe("a dev entry's name also has a stale vim.pack clone on disk", functio
 end)
 
 t.describe("the dashboard refreshes every visible row and a dev row is among them", function()
-  local view = require("pack_companion.dashboard.ui.view")
-  local refresh = require("pack_companion.dashboard.ui.refresh")
-  local state = require("pack_companion.dashboard.state")
+  local view = require("dash_paq.dashboard.ui.view")
+  local refresh = require("dash_paq.dashboard.ui.refresh")
+  local state = require("dash_paq.dashboard.state")
 
   local bufnr = vim.api.nvim_create_buf(false, true)
   local ctx = view.new_context({
