@@ -378,15 +378,70 @@ function M.toggle_target(base, has_src, choice)
   return M.matching_candidate_path(base, default) or default
 end
 
+-- Top-level Lua modules `dir` provides: the entries of `dir/lua`, with a
+-- `.lua` suffix stripped (`lua/foo/` and `lua/foo.lua` both give `foo`).
+local function lua_modules(dir)
+  local ok, entries = pcall(vim.fn.readdir, vim.fs.joinpath(dir, "lua"))
+  if not ok or type(entries) ~= "table" then
+    return {}
+  end
+  local out = {}
+  for _, entry in ipairs(entries) do
+    out[#out + 1] = entry:gsub("%.lua$", "")
+  end
+  return out
+end
+
+-- Why switching `name` to its installed `vim.pack` clone would leave it
+-- unloadable, or nil when it looks fine. Not installed counts as fine: the
+-- restart installs it. An installed clone must be a plugin directory and,
+-- when `dev_dir` (the checkout being left) has Lua modules, provide at least
+-- one of them -- otherwise the clone predates the dev checkout (for example a
+-- rename not yet pushed) and `require` would fail on the next start.
+function M.upstream_problem(name, dev_dir)
+  local ok, plugins = pcall(vim.pack.get, { name }, { info = false })
+  local clone = ok and type(plugins) == "table" and plugins[1] and plugins[1].path or nil
+  if type(clone) ~= "string" or vim.fn.isdirectory(clone) ~= 1 then
+    return nil
+  end
+  if not M.is_plugin_dir(clone) then
+    return string.format("the upstream clone at %s is not a plugin directory", clone)
+  end
+  local wanted = type(dev_dir) == "string" and lua_modules(dev_dir) or {}
+  if #wanted == 0 then
+    return nil
+  end
+  for _, module in ipairs(wanted) do
+    local base = vim.fs.joinpath(clone, "lua", module)
+    if vim.fn.isdirectory(base) == 1 or vim.fn.filereadable(base .. ".lua") == 1 then
+      return nil
+    end
+  end
+  return string.format(
+    "the upstream clone at %s has none of lua/%s that the dev checkout provides; update or push upstream first",
+    clone,
+    table.concat(wanted, ", lua/")
+  )
+end
+
 -- Saves `name`'s dev choice ("upstream" or an absolute path) to dev.json, then
 -- offers a `:restart` (no live reload: a restart is the only clean switch) via
--- `vim.fn.confirm`. A failed write is reported with an ERROR notify and skips
--- the restart prompt, since restarting would apply nothing. Returns whether
--- the choice was saved. `hooks` (confirm/restart) let tests stub the UI;
--- `hooks.from` optionally names what the plugin switches away from, shown in
--- the prompt.
+-- `vim.fn.confirm`. A switch to "upstream" is refused with a WARN, and nothing
+-- is saved, when `upstream_problem` finds the clone unusable. A failed write is
+-- reported with an ERROR notify and skips the restart prompt, since
+-- restarting would apply nothing. Returns whether the choice was saved.
+-- `hooks` (confirm/restart) let tests stub the UI; `hooks.from` optionally
+-- names what the plugin switches away from, shown in the prompt;
+-- `hooks.dev_dir` is the dev checkout being left, if any, for the clone check.
 function M.set_choice(name, target, hooks)
   hooks = hooks or {}
+  if target == "upstream" then
+    local problem = M.upstream_problem(name, hooks.dev_dir)
+    if problem then
+      vim.notify(string.format("%s: not switching to upstream: %s", name, problem), vim.log.levels.WARN)
+      return false
+    end
+  end
   local confirm_fn = hooks.confirm or vim.fn.confirm
   local restart_fn = hooks.restart or function()
     vim.cmd("restart")
@@ -398,7 +453,7 @@ function M.set_choice(name, target, hooks)
     vim.notify(name .. ": failed to save dev choice to " .. choices_path(), vim.log.levels.ERROR)
     return false
   end
-  local label = target == "upstream" and "upstream (vim.pack clone)" or target
+  local label = target == "upstream" and "upstream" or target
   local change = hooks.from and string.format("switching from %s to %s", hooks.from, label)
     or string.format("switching to %s", label)
   local msg = string.format("%s: %s.\nRestart now to apply? [y/N] ", name, change)

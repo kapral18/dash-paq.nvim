@@ -450,6 +450,12 @@ ignored with a warning and falls back to the default above.
 |:DashPaq-toggle-dev| does the same flip as a command: upstream <-> the default
 dev checkout. `L` stays the way to pick a specific worktree.
 
+A switch to upstream is refused with a warning, and nothing is saved, when
+the installed clone is not a plugin directory or has none of the top-level
+Lua modules the dev checkout provides (for example a rename that upstream
+does not have yet): update the clone or push upstream first. A clone that
+is not installed yet is not checked; the restart installs it.
+
 ==============================================================================
 11. Health                                                   *dash-paq-health*
 

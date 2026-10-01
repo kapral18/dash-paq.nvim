@@ -50,22 +50,52 @@ t.describe(":DashPaq toggle-dev with a plugin that has both an upstream src and 
   t.it("first toggle switches to upstream and offers a restart", function()
     vim.cmd("DashPaq toggle-dev bothplug")
     t.assert.equals("upstream", saved("bothplug"))
-    t.assert.truthy(
-      prompts[#prompts]:find("bothplug: switching from the dev checkout to upstream (vim.pack clone).", 1, true)
-    )
+    t.assert.truthy(prompts[#prompts]:find("bothplug: switching from the dev checkout to upstream.", 1, true))
   end)
 
   t.it("second toggle switches back to the dev checkout path", function()
     vim.cmd("DashPaq toggle-dev bothplug")
     t.assert.equals(dev.normalize_path(both_dir), saved("bothplug"))
-    t.assert.truthy(
-      prompts[#prompts]:find("switching from upstream (vim.pack clone) to " .. dev.normalize_path(both_dir), 1, true)
-    )
+    t.assert.truthy(prompts[#prompts]:find("switching from upstream to " .. dev.normalize_path(both_dir), 1, true))
   end)
 
   t.it("third toggle goes to upstream again", function()
     vim.cmd("DashPaq toggle-dev bothplug")
     t.assert.equals("upstream", saved("bothplug"))
+  end)
+end)
+
+t.describe(":DashPaq toggle-dev refuses upstream when the installed clone lacks the dev checkout's modules", function()
+  local stale_clone = dirfixture.new("bothplug-stale", { ["lua/oldname/init.lua"] = "return {}" })
+  local dev_module_dir = dirfixture.new("bothplug-newdev", { ["lua/newname/init.lua"] = "return {}" })
+  local orig_get = vim.pack.get
+
+  t.it("keeps the dev choice, warns, and does not prompt", function()
+    local cfg_dev = dev.normalize_path(both_dir)
+    vim.cmd("DashPaq toggle-dev bothplug")
+    t.assert.equals(cfg_dev, saved("bothplug"))
+    local prompts_before = #prompts
+    -- Stand-in for a dev checkout that provides `newname` while the clone only has `oldname`.
+    local orig_default = dev.default_dir
+    dev.default_dir = function()
+      return dev_module_dir
+    end
+    local orig_matching = dev.matching_candidate_path
+    dev.matching_candidate_path = function()
+      return dev_module_dir
+    end
+    vim.pack.get = function()
+      return { { path = stale_clone } }
+    end
+    local ok, err = pcall(vim.cmd, "DashPaq toggle-dev bothplug")
+    vim.pack.get = orig_get
+    dev.default_dir = orig_default
+    dev.matching_candidate_path = orig_matching
+    assert(ok, err)
+    t.assert.equals(cfg_dev, saved("bothplug"))
+    t.assert.equals(prompts_before, #prompts)
+    t.assert.equals(vim.log.levels.WARN, last_notice().level)
+    t.assert.truthy(last_notice().msg:find("bothplug: not switching to upstream", 1, true))
   end)
 end)
 

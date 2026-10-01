@@ -15,7 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - A tag-vs-branch version policy, cached under `stdpath("state")`.
 - An interactive update dashboard (`:DashPaq`) with drift, orphan, and risky-pin detection, plus
   breaking-change signals from commit messages.
-- One `:DashPaq` command with completed subcommands: `trace`/`load` for deferred-load inspection, `toggle-dev` to flip a plugin between upstream and its dev checkout, `sync`/`status`
+- One `:DashPaq` command with completed subcommands: `trace`/`load` for deferred-load inspection, `toggle-dev` to flip a plugin between upstream and its dev checkout (refused when the installed upstream clone lacks the dev checkout's Lua modules), `sync`/`status`
   reports, lockfile export/import, and version-policy rebuild; plus `:checkhealth dash_paq`.
 
 Extracted from the author's dotfiles (<https://github.com/kapral18/dotfiles>), where it replaced lazy.nvim in

@@ -185,7 +185,7 @@ local function dev_toggle_options(info, active)
 end
 
 local function dev_option_label(option)
-  local label = option.kind == "upstream" and "upstream (vim.pack clone)" or option.label
+  local label = option.kind == "upstream" and "upstream" or option.label
   if option.current then
     label = label .. "  (current)"
   end
@@ -227,11 +227,11 @@ function M.toggle_dev(ctx, row, hooks)
   end
 
   local function apply(option)
-    local from = active == "upstream" and "upstream (vim.pack clone)" or active
+    local from = active == "upstream" and "upstream" or active
     dev.set_choice(
       name,
       option.kind == "upstream" and "upstream" or option.path,
-      vim.tbl_extend("force", hooks, { from = from })
+      vim.tbl_extend("force", hooks, { from = from, dev_dir = active ~= "upstream" and active or nil })
     )
   end
 

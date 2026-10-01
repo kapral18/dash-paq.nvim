@@ -241,7 +241,7 @@ t.describe("the dashboard `L` toggle (dash_paq.dashboard.ui.operations.toggle_de
     t.assert.equals("upstream", dev.load_choices().badpathplug)
     t.assert.truthy(restarted)
     t.assert.truthy(prompt:find("badpathplug: switching from ", 1, true))
-    t.assert.truthy(prompt:find(" to upstream (vim.pack clone).", 1, true))
+    t.assert.truthy(prompt:find(" to upstream.", 1, true))
   end)
 
   t.it("more than 2 options: opens vim.ui.select and applies the chosen option", function()
@@ -297,6 +297,34 @@ t.describe("the dashboard `L` toggle (dash_paq.dashboard.ui.operations.toggle_de
     })
     t.assert.equals(realpath(upstream_dev_dir), dev.load_choices().upstreamplug)
     t.assert.truthy(restarted)
+  end)
+
+  t.it("dev -> upstream flip is refused when the clone lacks the active dev checkout's Lua modules", function()
+    local state = require("dash_paq.dashboard.state")
+    local stale_clone = dirfixture.new("upstreamplug-stale-clone", { ["lua/oldname/init.lua"] = "return {}" })
+    dirfixture.write(upstream_dev_dir, "lua/newname/init.lua", "return {}")
+    local before = dev.load_choices().upstreamplug
+    local orig_get, orig_notify = vim.pack.get, vim.notify
+    local prompted, warned = false, nil
+    vim.pack.get = function()
+      return { { path = stale_clone } }
+    end
+    vim.notify = function(msg)
+      warned = msg
+    end
+    state.dev_plugin_paths_cache.upstreamplug = realpath(upstream_dev_dir)
+    local ok, err = pcall(operations.toggle_dev, nil, { name = "upstreamplug" }, {
+      confirm = function()
+        prompted = true
+        return 2
+      end,
+    })
+    state.dev_plugin_paths_cache.upstreamplug = nil
+    vim.pack.get, vim.notify = orig_get, orig_notify
+    assert(ok, err)
+    t.assert.equals(before, dev.load_choices().upstreamplug)
+    t.assert.falsy(prompted)
+    t.assert.truthy(warned:find("upstreamplug: not switching to upstream", 1, true))
   end)
 
   t.it("a failed dev.json write is reported with an ERROR and skips the restart prompt", function()

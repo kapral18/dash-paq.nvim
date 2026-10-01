@@ -264,4 +264,79 @@ t.describe("dev.is_plugin_dir", function()
   end)
 end)
 
+t.describe("dev.upstream_problem / the set_choice guard for a switch to upstream", function()
+  local dev_checkout = dirfixture.new("guard-dev", { ["lua/newname/init.lua"] = "return {}", ["lua/helper.lua"] = "" })
+  local good_clone = dirfixture.new("guard-good", { ["lua/newname/init.lua"] = "return {}" })
+  local stale_clone = dirfixture.new("guard-stale", { ["lua/oldname/init.lua"] = "return {}" })
+  local docs_clone = dirfixture.new("guard-docs", { ["README.md"] = "x" })
+  local orig_get = vim.pack.get
+  local orig_notify = vim.notify
+
+  local function with_clone(path, fn)
+    vim.pack.get = function()
+      return path and { { path = path } } or error("Plugin `guardplug` is not installed", 0)
+    end
+    local ok, err = pcall(fn)
+    vim.pack.get = orig_get
+    assert(ok, err)
+  end
+
+  t.it("is fine when the plugin has no installed clone yet (the restart installs it)", function()
+    with_clone(nil, function()
+      t.assert.is_nil(dev.upstream_problem("guardplug", dev_checkout))
+    end)
+  end)
+
+  t.it("is fine when the clone provides one of the dev checkout's Lua modules", function()
+    with_clone(good_clone, function()
+      t.assert.is_nil(dev.upstream_problem("guardplug", dev_checkout))
+    end)
+  end)
+
+  t.it("is fine for any plugin clone when there is no dev checkout to compare", function()
+    with_clone(stale_clone, function()
+      t.assert.is_nil(dev.upstream_problem("guardplug", nil))
+    end)
+  end)
+
+  t.it("flags a clone that has none of the dev checkout's Lua modules", function()
+    with_clone(stale_clone, function()
+      local problem = dev.upstream_problem("guardplug", dev_checkout)
+      t.assert.truthy(problem:find("none of lua/", 1, true))
+      t.assert.truthy(problem:find("newname", 1, true))
+    end)
+  end)
+
+  t.it("flags a clone that is not a plugin directory", function()
+    with_clone(docs_clone, function()
+      t.assert.truthy(dev.upstream_problem("guardplug", nil):find("not a plugin directory", 1, true))
+    end)
+  end)
+
+  t.it("set_choice refuses upstream, warns, and saves nothing; a dev path still saves", function()
+    local warned, prompted = {}, false
+    vim.notify = function(msg, level)
+      warned[#warned + 1] = { msg = msg, level = level }
+    end
+    local hooks = {
+      dev_dir = dev_checkout,
+      confirm = function()
+        prompted = true
+        return 2
+      end,
+    }
+    with_clone(stale_clone, function()
+      t.assert.equals(false, dev.set_choice("guardplug", "upstream", hooks))
+      t.assert.is_nil(dev.load_choices().guardplug)
+      t.assert.falsy(prompted)
+      t.assert.equals(1, #warned)
+      t.assert.equals(vim.log.levels.WARN, warned[1].level)
+      t.assert.truthy(warned[1].msg:find("not switching to upstream", 1, true))
+      t.assert.equals(true, dev.set_choice("guardplug", dev_checkout, hooks))
+      t.assert.equals(dev_checkout, dev.load_choices().guardplug)
+    end)
+    vim.notify = orig_notify
+  end)
+end)
+
 t.finish()

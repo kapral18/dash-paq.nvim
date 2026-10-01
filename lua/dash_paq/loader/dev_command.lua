@@ -19,13 +19,17 @@ function M.toggle(dev_capable, name, hooks)
     vim.notify(name .. ": no dev checkout configured", vim.log.levels.WARN)
     return
   end
-  local target, reason = dev.toggle_target(info.base, info.has_src, dev.load_choices()[name])
+  local choice = dev.load_choices()[name]
+  local target, reason = dev.toggle_target(info.base, info.has_src, choice)
   if not target then
     vim.notify(name .. ": " .. reason, vim.log.levels.WARN)
     return
   end
-  local from = target == "upstream" and "the dev checkout" or "upstream (vim.pack clone)"
-  dev.set_choice(name, target, vim.tbl_extend("force", hooks or {}, { from = from }))
+  local from = target == "upstream" and "the dev checkout" or "upstream"
+  local dev_dir = target == "upstream"
+      and (dev.matching_candidate_path(info.base, choice) or dev.default_dir(info.base))
+    or nil
+  dev.set_choice(name, target, vim.tbl_extend("force", hooks or {}, { from = from, dev_dir = dev_dir }))
 end
 
 function M.setup(dev_capable)
