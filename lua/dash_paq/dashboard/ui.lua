@@ -4,6 +4,7 @@ local report = require("dash_paq.dashboard.report")
 local view = require("dash_paq.dashboard.ui.view")
 local bindings = require("dash_paq.dashboard.ui.bindings")
 local refresh = require("dash_paq.dashboard.ui.refresh")
+local defaults = require("dash_paq.config").defaults.dashboard
 
 local M = {}
 
@@ -25,11 +26,11 @@ end
 local function open_popup_window(ctx)
   local cfg = state.dashboard_config
   local total_lines = vim.o.lines - vim.o.cmdheight
-  local width_ratio = math.max(0.45, math.min(0.98, tonumber(cfg.width_ratio) or 0.68))
-  local height_ratio = math.max(0.45, math.min(0.98, tonumber(cfg.height_ratio) or 0.68))
-  local min_width = tonumber(cfg.min_width) or 84
-  local min_height = tonumber(cfg.min_height) or 18
-  local margin = math.max(2, tonumber(cfg.margin) or 6)
+  local width_ratio = math.max(0.45, math.min(0.98, tonumber(cfg.width_ratio) or defaults.width_ratio))
+  local height_ratio = math.max(0.45, math.min(0.98, tonumber(cfg.height_ratio) or defaults.height_ratio))
+  local min_width = tonumber(cfg.min_width) or defaults.min_width
+  local min_height = tonumber(cfg.min_height) or defaults.min_height
+  local margin = math.max(2, tonumber(cfg.margin) or defaults.margin)
 
   local width = math.min(math.max(min_width, math.floor(vim.o.columns * width_ratio)), vim.o.columns - margin)
   local height = math.min(math.max(min_height, math.floor(total_lines * height_ratio)), total_lines - margin)
@@ -70,7 +71,7 @@ local function open_popup_window(ctx)
   })
 end
 
-function M.open(online, force_scan)
+function M.open(force_scan)
   if dashboard_winid and vim.api.nvim_win_is_valid(dashboard_winid) then
     if force_scan then
       pcall(vim.api.nvim_win_close, dashboard_winid, true)
@@ -107,7 +108,7 @@ function M.open(online, force_scan)
   -- Always start with a fresh online status check on open: each row arrives
   -- independently via the unified per-row pipeline (same as pressing `R`).
   if state.dashboard_config.refresh_on_open ~= false then
-    refresh.refresh(ctx, true, nil, { mark_online = true, mark_offline = false })
+    refresh.refresh(ctx, true)
   end
 end
 

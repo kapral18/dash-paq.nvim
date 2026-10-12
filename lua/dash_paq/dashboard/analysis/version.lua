@@ -92,12 +92,11 @@ local function needs_current_revision_tags(resolved)
     or (type(resolved) == "string" and not is_commit_string(resolved) and resolved:match("%d") ~= nil)
 end
 
--- Process one plugin per tick: each plugin can still run sync `git tag`
--- calls (gitcmd.tags_on_revision/all_tags), so a bigger per-tick batch would
--- delay input for too long on large plugin sets. `ms >= 1`: a 0ms
--- `vim.defer_fn` chain, like a bare `vim.schedule` chain, is not guaranteed
--- to yield to input between steps.
-local PLUGINS_PER_TICK = 1
+-- One plugin per tick: each plugin can still run sync `git tag` calls
+-- (gitcmd.tags_on_revision/all_tags), so a bigger per-tick batch would delay
+-- input for too long on large plugin sets. `ms >= 1`: a 0ms `vim.defer_fn`
+-- chain, like a bare `vim.schedule` chain, is not guaranteed to yield to
+-- input between steps.
 local STEP_YIELD_MS = 1
 
 local function refresh_version_flags_async(done)
@@ -112,14 +111,12 @@ local function refresh_version_flags_async(done)
 
   state.version_flags_scan_running = true
   local index = 1
+  -- Rows use the cached result on the next render, so slow git tag calls
+  -- never delay opening the dashboard.
   local function step()
-    -- Process a few rows per tick so slow git tag calls never delay opening the
-    -- dashboard. Rows use the cached result on the next render.
-    local processed = 0
-    while index <= #plugins and processed < PLUGINS_PER_TICK do
-      local plugin = plugins[index]
+    local plugin = plugins[index]
+    if plugin then
       index = index + 1
-      processed = processed + 1
 
       local name = plugin.spec and plugin.spec.name
       local intent = type(name) == "string" and state.declared_versions_cache[name] or nil

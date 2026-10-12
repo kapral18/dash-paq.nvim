@@ -1,39 +1,11 @@
 local state = require("dash_paq.dashboard.state")
 local analysis = require("dash_paq.dashboard.analysis")
 local fmt = require("dash_paq.dashboard.ui.format")
+local render = require("dash_paq.dashboard.ui.render")
 
 local M = {}
 
 local details_ns = vim.api.nvim_create_namespace("dash_paq.dashboard.details")
-
--- Reuse the dashboard table palette so the popup reads as part of the same UI.
--- Each is a `default = true` link, so a colorscheme can still override it.
-local function ensure_details_highlights()
-  local set_hl = vim.api.nvim_set_hl
-  set_hl(0, "DashPaqTitle", { default = true, link = "Title" })
-  set_hl(0, "DashPaqHeader", { default = true, link = "Identifier" })
-  set_hl(0, "DashPaqMeta", { default = true, link = "Comment" })
-  set_hl(0, "DashPaqLink", { default = true, link = "Underlined" })
-  set_hl(0, "DashPaqStatusUpdate", { default = true, link = "DiagnosticInfo" })
-  set_hl(0, "DashPaqStatusSame", { default = true, link = "String" })
-  set_hl(0, "DashPaqStatusError", { default = true, link = "DiagnosticError" })
-  set_hl(0, "DashPaqStatusUnknown", { default = true, link = "Comment" })
-  set_hl(0, "DashPaqStatusOrphan", { default = true, link = "DiagnosticWarn" })
-  set_hl(0, "DashPaqStatusDrift", { default = true, link = "DiagnosticWarn" })
-  set_hl(0, "DashPaqStatusRisky", { default = true, link = "DiagnosticWarn" })
-  set_hl(0, "DashPaqRiskBreak", { default = true, link = "DiagnosticWarn" })
-  set_hl(0, "DashPaqRiskSafe", { default = true, link = "DiffAdd" })
-end
-
-local DETAILS_STATUS_HL = {
-  update = "DashPaqStatusUpdate",
-  same = "DashPaqStatusSame",
-  error = "DashPaqStatusError",
-  unknown = "DashPaqStatusUnknown",
-  orphan = "DashPaqStatusOrphan",
-  drift = "DashPaqStatusDrift",
-  risky = "DashPaqStatusRisky",
-}
 
 -- Color a `Label: value` line: the label up to and including the colon gets the
 -- header group, and the value (if a group is given) gets `value_hl`.
@@ -103,7 +75,7 @@ function M.open_details(ctx, row)
   local meta_lines = {} -- dimmed lines (footer hint)
   local commit_lines = {} -- pending commit lines (hash gets accent)
 
-  local status_value_hl = DETAILS_STATUS_HL[row.status] or "DashPaqStatusUnknown"
+  local status_value_hl = render.status_hl[row.status] or "DashPaqStatusUnknown"
   local risk_value_hl = (row.status == "update")
       and (row.breaking == true and "DashPaqRiskBreak" or (row.breaking == false and "DashPaqRiskSafe" or "DashPaqStatusUnknown"))
     or nil
@@ -195,7 +167,7 @@ function M.open_details(ctx, row)
   vim.bo[ctx.details_bufnr].filetype = "dashpaq-details"
   vim.api.nvim_buf_set_lines(ctx.details_bufnr, 0, -1, false, lines)
   vim.bo[ctx.details_bufnr].modifiable = false
-  ensure_details_highlights()
+  render.ensure_highlights()
 
   local bufnr = ctx.details_bufnr
   for line_no, value_hl in pairs(field_lines) do

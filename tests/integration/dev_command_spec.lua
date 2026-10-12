@@ -4,6 +4,7 @@
 local t = require("runner")
 local dirfixture = require("support.dirfixture")
 local dev = require("dash_paq.loader.dev")
+local fs = require("dash_paq.fs")
 
 local dev_root = dirfixture.tmp_dir("dev-command-root")
 
@@ -55,8 +56,8 @@ t.describe(":DashPaq toggle-dev with a plugin that has both an upstream src and 
 
   t.it("second toggle switches back to the dev checkout path", function()
     vim.cmd("DashPaq toggle-dev bothplug")
-    t.assert.equals(dev.normalize_path(both_dir), saved("bothplug"))
-    t.assert.truthy(prompts[#prompts]:find("switching from upstream to " .. dev.normalize_path(both_dir), 1, true))
+    t.assert.equals(fs.real_path(both_dir), saved("bothplug"))
+    t.assert.truthy(prompts[#prompts]:find("switching from upstream to " .. fs.real_path(both_dir), 1, true))
   end)
 
   t.it("third toggle goes to upstream again", function()
@@ -71,7 +72,7 @@ t.describe(":DashPaq toggle-dev refuses upstream when the installed clone lacks 
   local orig_get = vim.pack.get
 
   t.it("keeps the dev choice, warns, and does not prompt", function()
-    local cfg_dev = dev.normalize_path(both_dir)
+    local cfg_dev = fs.real_path(both_dir)
     vim.cmd("DashPaq toggle-dev bothplug")
     t.assert.equals(cfg_dev, saved("bothplug"))
     local prompts_before = #prompts

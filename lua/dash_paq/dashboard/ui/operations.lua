@@ -5,6 +5,7 @@ local policy = require("dash_paq.policy")
 local view = require("dash_paq.dashboard.ui.view")
 local refresh = require("dash_paq.dashboard.ui.refresh")
 local dev = require("dash_paq.loader.dev")
+local fs = require("dash_paq.fs")
 
 local M = {}
 
@@ -44,7 +45,7 @@ function M.update_by_names(ctx, names, empty_msg, noop_msg)
     end
     if #risky > 0 then
       local msg = string.format(
-        "%d plugin(s) flagged as risky (%s).\nProceed with force update? [y/N] ",
+        "%d plugin(s) flagged as breaking (%s).\nProceed with the update?",
         #risky,
         table.concat(risky, ", ")
       )
@@ -67,10 +68,10 @@ function M.update_by_names(ctx, names, empty_msg, noop_msg)
     names = filtered,
     online = true,
     apply_batch_size = state.dashboard_config.apply_batch_size,
-    apply_rows = function(names)
-      local ok, err = pcall(vim.pack.update, names, { offline = true, force = true })
+    apply_rows = function(batch)
+      local ok, err = pcall(vim.pack.update, batch, { offline = true, force = true })
       if ok then
-        applied = applied + #names
+        applied = applied + #batch
       end
       return ok, err
     end,
@@ -101,7 +102,7 @@ function M.clean_orphan_rows(ctx, targets, scope_label)
     if #preview > 240 then
       preview = preview:sub(1, 237) .. "..."
     end
-    local msg = string.format("Clean %d %s orphan plugin(s)?\n  %s\nContinue? [y/N] ", #targets, scope_label, preview)
+    local msg = string.format("Clean %d %s orphan plugin(s)?\n  %s", #targets, scope_label, preview)
     if vim.fn.confirm(msg, "&Yes\n&No", 2) ~= 1 then
       vim.notify("Clean cancelled", vim.log.levels.INFO)
       return
@@ -169,7 +170,7 @@ end
 -- entry in `dev_plugin_paths_cache`, or "upstream" when it has none).
 local function dev_toggle_options(info, active)
   local options = {}
-  local active_path = active ~= "upstream" and dev.normalize_path(active) or nil
+  local active_path = active ~= "upstream" and fs.real_path(active) or nil
   if info.has_src then
     options[#options + 1] = { kind = "upstream", current = active == "upstream" }
   end
@@ -208,7 +209,7 @@ end
 -- `vim.ui.select`. The choice is saved and a restart offered by
 -- `dev.set_choice`. `hooks` (select/confirm/restart) let tests stub the
 -- UI/restart calls.
-function M.toggle_dev(ctx, row, hooks)
+function M.toggle_dev(row, hooks)
   hooks = hooks or {}
   local select_fn = hooks.select or vim.ui.select
 
@@ -227,11 +228,10 @@ function M.toggle_dev(ctx, row, hooks)
   end
 
   local function apply(option)
-    local from = active == "upstream" and "upstream" or active
     dev.set_choice(
       name,
       option.kind == "upstream" and "upstream" or option.path,
-      vim.tbl_extend("force", hooks, { from = from, dev_dir = active ~= "upstream" and active or nil })
+      vim.tbl_extend("force", hooks, { from = active, dev_dir = active ~= "upstream" and active or nil })
     )
   end
 

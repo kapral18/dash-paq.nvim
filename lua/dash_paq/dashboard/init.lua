@@ -5,6 +5,7 @@ local lockfile = require("dash_paq.dashboard.lockfile")
 local analysis = require("dash_paq.dashboard.analysis")
 local policy = require("dash_paq.policy")
 local commands = require("dash_paq.commands")
+local fs = require("dash_paq.fs")
 
 local M = {}
 
@@ -114,16 +115,8 @@ local function lock_info()
     vim.notify("vim.pack lockfile not found at " .. path, vim.log.levels.WARN)
     return
   end
-  local ok_read, lines = pcall(vim.fn.readfile, path)
-  local plugins = 0
-  if ok_read and type(lines) == "table" then
-    local ok_decode, decoded = pcall(vim.json.decode, table.concat(lines, "\n"))
-    if ok_decode and type(decoded) == "table" and type(decoded.plugins) == "table" then
-      for _ in pairs(decoded.plugins) do
-        plugins = plugins + 1
-      end
-    end
-  end
+  local decoded = fs.read_json(path)
+  local plugins = decoded and type(decoded.plugins) == "table" and vim.tbl_count(decoded.plugins) or 0
   local stat = vim.uv.fs_stat(path)
   local mtime = stat and os.date("%Y-%m-%d %H:%M:%S", stat.mtime.sec) or "unknown"
   vim.notify(
@@ -153,7 +146,12 @@ local function lock_import(source)
   local ok, result = lockfile.import(source)
   if ok then
     vim.notify(
-      "Imported lockfile from " .. source .. " → " .. result .. ". Restart or run :DashPaq sync to apply.",
+      "Imported lockfile from "
+        .. source
+        .. " → "
+        .. result
+        .. ". Restart now: until then, any applied vim.pack update or delete writes the old lockfile back. After the"
+        .. " restart, run `:lua vim.pack.update(nil, { target = 'lockfile' })` to move installed plugins to it.",
       vim.log.levels.INFO
     )
   else
@@ -248,7 +246,7 @@ function M.setup(config)
     usage = "[!]",
     bang = true,
     impl = function(_, opts)
-      ui.open(true, opts.bang)
+      ui.open(opts.bang)
     end,
   })
   commands.register("sync", { usage = "sync", impl = sync })

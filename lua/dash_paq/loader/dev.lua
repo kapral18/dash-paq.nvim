@@ -1,11 +1,11 @@
 -- Dev-checkout resolution: per-plugin base dir, git worktree/container
 -- detection, and the persisted per-plugin dev choice
--- (stdpath("state")/dash-paq/dev.json). Kept separate from
--- loader/spec.lua so the git/filesystem probing here stays unit-testable on
--- its own, without pulling in the full spec-flattening machinery.
+-- (stdpath("state")/dash-paq/dev.json).
 local M = {}
 
 local spec_mod = require("dash_paq.loader.spec")
+local git = require("dash_paq.git")
+local fs = require("dash_paq.fs")
 
 -- The per-plugin base dir a dev entry resolves against: `entry.dev_base`
 -- (set by loader/spec.lua when `spec.dev` is a string) if present, else the
@@ -17,44 +17,12 @@ function M.base_dir_for(entry, dev_cfg)
   return spec_mod.dev_path_for(entry.name, dev_cfg)
 end
 
--- Resolves symlinks/`..`/trailing slashes so paths compared or stored below
--- (candidates, default dirs, active dirs, saved choices) are stable
--- regardless of how they were spelled (macOS's `/tmp` -> `/private/tmp`, a
--- symlinked checkout, a saved `dev = "~/code/foo/"`). Falls back to
--- `vim.fs.normalize` for a path that doesn't exist (`fs_realpath` needs a
--- real target); mirrors loader/triggers.lua's `normalized_real_path`.
-local function normalize_path(path)
-  if type(path) ~= "string" or path == "" then
-    return path
-  end
-  local real = vim.uv.fs_realpath(path)
-  return vim.fs.normalize(real or path)
-end
-
-M.normalize_path = normalize_path
-
--- Env used for every git shell-out below: clears `GIT_DIR`/`GIT_WORK_TREE`/
--- `GIT_INDEX_FILE` so a caller's own git-repo env vars (a bare-dotfiles
--- setup, or nvim spawned from a git process) never redirect these calls,
--- mirroring dashboard/report/pipeline.lua's `clean_env` (and upstream
--- vim.pack's `git_cmd`).
-local function clean_env()
-  local env = vim.fn.environ()
-  env.GIT_DIR = nil
-  env.GIT_WORK_TREE = nil
-  env.GIT_INDEX_FILE = nil
-  return env
-end
-
--- Runs a git subcommand in `cwd` with a clean git env (above) and never
--- raising: a missing `git` binary (ENOENT) is caught by `pcall` rather than
--- aborting `setup()`. Returns the `vim.system` result, or nil on any
--- failure to even launch the process.
+-- Runs a git subcommand in `cwd`, never raising: a missing `git` binary
+-- (ENOENT) is caught by `pcall` rather than aborting `setup()`. Returns the
+-- `vim.system` result, or nil on any failure to even launch the process.
 local function run_git(args, cwd)
-  local cmd = { "git" }
-  vim.list_extend(cmd, args)
   local ok, result = pcall(function()
-    return vim.system(cmd, { cwd = cwd, text = true, env = clean_env(), clear_env = true }):wait()
+    return git.run(args, { cwd = cwd, text = true }):wait()
   end)
   if not ok then
     return nil
@@ -154,7 +122,7 @@ end
 
 -- Pure parser for `git worktree list --porcelain` output: one entry per
 -- `worktree <path>` block (blocks are blank-line separated), with
--- `head`/`branch`/`bare`/`detached`/`locked`/`prunable` fields as present.
+-- `head`/`branch`/`bare` fields as present.
 -- No filesystem or git I/O; callers filter by existence/bare-ness.
 function M.parse_worktree_porcelain(output)
   local entries = {}
@@ -168,16 +136,10 @@ function M.parse_worktree_porcelain(output)
     elseif current then
       if line == "bare" then
         current.bare = true
-      elseif line == "detached" then
-        current.detached = true
       elseif line:match("^branch ") then
         current.branch = line:sub(#"branch " + 1):gsub("^refs/heads/", "")
       elseif line:match("^HEAD ") then
         current.head = line:sub(#"HEAD " + 1)
-      elseif line:match("^locked") then
-        current.locked = true
-      elseif line:match("^prunable") then
-        current.prunable = true
       end
     end
   end
@@ -197,7 +159,7 @@ function M.list_worktrees(git_dir)
   local out = {}
   for _, entry in ipairs(M.parse_worktree_porcelain(result.stdout)) do
     if not entry.bare and type(entry.path) == "string" and entry.path ~= "" and vim.fn.isdirectory(entry.path) == 1 then
-      entry.path = normalize_path(entry.path)
+      entry.path = fs.real_path(entry.path)
       entry.label = candidate_label(entry)
       out[#out + 1] = entry
     end
@@ -214,7 +176,7 @@ function M.candidates_for(base)
     return {}, kind
   end
   if kind == "plain" then
-    local normalized = normalize_path(base)
+    local normalized = fs.real_path(base)
     return { { path = normalized, label = normalized } }, kind
   end
   return M.list_worktrees(git_dir), kind
@@ -277,8 +239,8 @@ end
 -- change has since pointed elsewhere. Returns the matching candidate's
 -- normalized path, or nil when `choice` doesn't match any candidate.
 function M.matching_candidate_path(base, choice)
-  local normalized_choice = normalize_path(choice)
-  if type(normalized_choice) ~= "string" or normalized_choice == "" then
+  local normalized_choice = fs.real_path(choice)
+  if not normalized_choice then
     return nil
   end
   for _, candidate in ipairs(M.candidates_for(base)) do
@@ -289,36 +251,15 @@ function M.matching_candidate_path(base, choice)
   return nil
 end
 
-local function choices_path()
-  return vim.fs.joinpath(vim.fn.stdpath("state"), "dash-paq", "dev.json")
-end
-
-M.choices_path = choices_path
-
-local function ensure_state_dir()
-  local dir = vim.fs.dirname(choices_path())
-  if vim.fn.isdirectory(dir) ~= 1 then
-    pcall(vim.fn.mkdir, dir, "p")
-  end
+function M.choices_path()
+  return fs.state_path("dev.json")
 end
 
 -- Reads the saved per-plugin dev choices (name -> "upstream" | absolute
 -- path). Tolerates a missing or corrupt file: both return an empty table.
 function M.load_choices()
-  local path = choices_path()
-  if vim.fn.filereadable(path) ~= 1 then
-    return {}
-  end
-  local ok_read, lines = pcall(vim.fn.readfile, path)
-  if not ok_read or type(lines) ~= "table" then
-    return {}
-  end
-  local ok_decode, decoded = pcall(vim.json.decode, table.concat(lines, "\n"))
-  if not ok_decode or type(decoded) ~= "table" then
-    return {}
-  end
   local out = {}
-  for name, value in pairs(decoded) do
+  for name, value in pairs(fs.read_json(M.choices_path()) or {}) do
     if type(name) == "string" and name ~= "" and type(value) == "string" and value ~= "" then
       out[name] = value
     end
@@ -329,13 +270,7 @@ end
 -- Overwrites the saved choices file with `choices` (name -> "upstream" |
 -- absolute path). Returns true on success.
 function M.save_choices(choices)
-  ensure_state_dir()
-  local ok_json, encoded = pcall(vim.json.encode, type(choices) == "table" and choices or {})
-  if not ok_json or type(encoded) ~= "string" then
-    return false
-  end
-  local ok_write = pcall(vim.fn.writefile, { encoded }, choices_path())
-  return ok_write and true or false
+  return fs.write_json(M.choices_path(), type(choices) == "table" and choices or {})
 end
 
 -- What a toggle should switch `base`'s plugin to: "upstream" when it currently
@@ -450,13 +385,12 @@ function M.set_choice(name, target, hooks)
   local choices = M.load_choices()
   choices[name] = target
   if not M.save_choices(choices) then
-    vim.notify(name .. ": failed to save dev choice to " .. choices_path(), vim.log.levels.ERROR)
+    vim.notify(name .. ": failed to save dev choice to " .. M.choices_path(), vim.log.levels.ERROR)
     return false
   end
-  local label = target == "upstream" and "upstream" or target
-  local change = hooks.from and string.format("switching from %s to %s", hooks.from, label)
-    or string.format("switching to %s", label)
-  local msg = string.format("%s: %s.\nRestart now to apply? [y/N] ", name, change)
+  local change = hooks.from and string.format("switching from %s to %s", hooks.from, target)
+    or string.format("switching to %s", target)
+  local msg = string.format("%s: %s.\nRestart now to apply?", name, change)
   if confirm_fn(msg, "&Yes\n&No", 2) == 1 then
     local ok, err = pcall(restart_fn)
     if not ok then

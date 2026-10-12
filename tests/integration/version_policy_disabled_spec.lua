@@ -66,11 +66,29 @@ t.describe("the `U` op updates a plugin with a pending update", function()
     search_text = nil,
   })
 
+  local cache = require("dash_paq.dashboard.state").pack_report_cache
+
   -- Matches the real dashboard flow: R refresh before U update.
   refresh.refresh(ctx, true)
   t.wait_until(function()
     return ctx.online_check_running == false
   end, 10000, "initial online refresh never finished")
+
+  t.it("stamps only the online check time after an online refresh", function()
+    t.assert.equals("online", cache.mode)
+    t.assert.truthy(cache.last_online_at)
+    t.assert.is_nil(cache.last_offline_at)
+  end)
+
+  refresh.refresh(ctx, false)
+  t.wait_until(function()
+    return ctx.online_check_running == false
+  end, 10000, "offline refresh never finished")
+
+  t.it("stamps the offline check time after an offline refresh", function()
+    t.assert.equals("offline", cache.mode)
+    t.assert.truthy(cache.last_offline_at)
+  end)
 
   t.it("has detected the pending update before running the update op", function()
     local row
@@ -120,6 +138,21 @@ t.describe(":DashPaq with the dashboard enabled", function()
     local dest = vim.fs.joinpath(vim.fn.stdpath("state"), "lock export", "lock.json")
     vim.cmd("DashPaq lock export " .. dest)
     t.assert.equals(1, vim.fn.filereadable(dest))
+  end)
+
+  t.it("imports a lockfile and says to restart, then update to the lockfile", function()
+    local dest = vim.fs.joinpath(vim.fn.stdpath("state"), "lock export", "lock.json")
+    local notes = {}
+    local orig = vim.notify
+    vim.notify = function(msg)
+      notes[#notes + 1] = msg
+    end
+    vim.cmd("DashPaq lock import " .. dest)
+    vim.notify = orig
+    t.assert.equals(1, #notes)
+    t.assert.truthy(notes[1]:find("Restart now", 1, true))
+    t.assert.truthy(notes[1]:find("vim.pack.update(nil, { target = 'lockfile' })", 1, true))
+    t.assert.truthy(notes[1]:find("Restart now", 1, true) < notes[1]:find("target = 'lockfile'", 1, true))
   end)
 
   t.it("reaches policy-rebuild, which warns while the policy is disabled", function()

@@ -234,7 +234,7 @@ t.describe("the `U` op separates applies with a real event-loop yield, not a bac
     end)
     concurrent = concurrent - 1
     sentinel_fired = false
-    local uv = vim.uv or vim.loop
+    local uv = vim.uv
     local timer = uv.new_timer()
     timer:start(1, 0, function()
       sentinel_fired = true

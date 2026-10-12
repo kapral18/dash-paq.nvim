@@ -10,9 +10,14 @@ local SPINNER_INTERVAL_MS = 90
 -- Gap between one queued update-apply and the next. Chaining with bare
 -- `vim.schedule` would starve input, because Neovim drains newly queued
 -- scheduled callbacks within the same event-queue pass; `vim.defer_fn` with
--- ms >= 1 actually yields. This turns 56 back-to-back ~180ms applies into one
--- event-loop turn each, instead of one 12s turn.
+-- ms >= 1 actually yields, so each apply gets its own event-loop turn.
 local APPLY_YIELD_MS = 10
+
+-- A queued apply waits until the cursor has been still this long. Each apply
+-- blocks input for its whole `vim.pack.update` call (hundreds of ms per
+-- batch), so an apply that runs while the user moves through the rows makes
+-- the cursor lag.
+local CURSOR_IDLE_MS = 300
 
 -- Stop and dispose the per-row spinner animation timer, if running.
 local function stop_spinner(ctx)
@@ -148,9 +153,7 @@ end
 -- return that resolved name list. `names` nil means every currently *visible*
 -- row (used by the r/R refresh, which honors the active filter): the returned
 -- list is then fed to the pipeline so the in-flight set, the progress
--- denominator, and the plugins refreshed are one and the same
--- population (otherwise a filtered r/R marked the 2 visible rows but the
--- nil-names pipeline scanned all managed plugins, yielding e.g. "status 79/2").
+-- denominator, and the plugins refreshed are one and the same population.
 -- `dev` rows are synthetic (never in `vim.pack.get`): including one in the
 -- pipeline's `names` filter makes `vim.pack.get(names)` error for the whole
 -- batch, zeroing out every row's refresh, not just the dev one's.
@@ -247,7 +250,7 @@ function M.run_row_op(ctx, spec)
     ctx.rows = report.collect_dashboard_rows()
     target_names = mark_targets(ctx, spec.names)
     total = vim.tbl_count(ctx.refreshing)
-    ctx.online_check_progress = { phase = "status", done = 0, total = total }
+    ctx.online_check_progress = { done = 0, total = total }
     view.render(ctx)
     start_spinner(ctx)
     local current = rows.row_at_cursor(ctx)
@@ -328,6 +331,11 @@ function M.run_row_op(ctx, spec)
         maybe_finalize()
         return
       end
+      local idle_ms = state.last_cursor_move and (vim.uv.hrtime() - state.last_cursor_move) / 1e6
+      if idle_ms and idle_ms < CURSOR_IDLE_MS then
+        vim.defer_fn(drain_step, math.ceil(CURSOR_IDLE_MS - idle_ms))
+        return
+      end
       local batch, names = {}, {}
       while #batch < batch_size and #apply_queue > 0 do
         local result = table.remove(apply_queue, 1)
@@ -359,7 +367,7 @@ function M.run_row_op(ctx, spec)
       -- Always yield after an apply, even with nothing queued: a result that
       -- arrives in a later `vim.schedule` callback of this same event-loop pass
       -- only enqueues and is applied by the next step, after input/redraw ran,
-      -- instead of starting another ~180ms apply back-to-back. The step that
+      -- instead of starting another blocking apply back-to-back. The step that
       -- finds the queue empty settles `draining` and finalizes.
       vim.defer_fn(drain_step, APPLY_YIELD_MS)
     end
@@ -389,7 +397,7 @@ function M.run_row_op(ctx, spec)
       if finished then
         return
       end
-      ctx.online_check_progress = { phase = "status", done = done_count, total = total }
+      ctx.online_check_progress = { done = done_count, total = total }
       view.render_header(ctx)
     end, function()
       if finished then
@@ -435,19 +443,18 @@ end
 -- No start/result toasts: the dashboard itself shows per-row spinners and the
 -- header counters/stamps, so progress and outcome are already visible. Only
 -- genuine failures still surface (via finalize's default error warn).
-function M.refresh(ctx, next_online, names, opts)
-  opts = opts or {}
+function M.refresh(ctx, online)
   M.run_row_op(ctx, {
-    names = names,
-    online = next_online,
+    online = online,
     on_finalize = function(counts)
-      state.pack_report_cache.last_check_counts = counts
-      state.pack_report_cache.mode = next_online and "online" or "offline"
-      state.pack_report_cache.updated_at = os.time()
-      if next_online and opts.mark_online then
-        state.pack_report_cache.last_online_at = os.time()
-      elseif (not next_online) and opts.mark_offline then
-        state.pack_report_cache.last_offline_at = os.time()
+      local cache = state.pack_report_cache
+      cache.last_check_counts = counts
+      cache.mode = online and "online" or "offline"
+      cache.updated_at = os.time()
+      if online then
+        cache.last_online_at = cache.updated_at
+      else
+        cache.last_offline_at = cache.updated_at
       end
     end,
   })

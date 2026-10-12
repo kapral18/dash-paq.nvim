@@ -229,7 +229,7 @@ t.describe("the dashboard `L` toggle (dash_paq.dashboard.ui.operations.toggle_de
   t.it("2 options: flips directly to the other one, writes dev.json, and restarts on confirm", function()
     local restarted = false
     local prompt = nil
-    operations.toggle_dev(nil, { name = "badpathplug" }, {
+    operations.toggle_dev({ name = "badpathplug" }, {
       confirm = function(msg)
         prompt = msg
         return 1 -- "Yes"
@@ -247,7 +247,7 @@ t.describe("the dashboard `L` toggle (dash_paq.dashboard.ui.operations.toggle_de
   t.it("more than 2 options: opens vim.ui.select and applies the chosen option", function()
     local seen_options = nil
     local restarted = false
-    operations.toggle_dev(nil, { name = "choiceplug" }, {
+    operations.toggle_dev({ name = "choiceplug" }, {
       select = function(options, _select_opts, on_choice)
         seen_options = options
         for _, option in ipairs(options) do
@@ -277,7 +277,7 @@ t.describe("the dashboard `L` toggle (dash_paq.dashboard.ui.operations.toggle_de
         warned = true
       end
     end
-    operations.toggle_dev(nil, { name = "not-a-real-plugin" }, {})
+    operations.toggle_dev({ name = "not-a-real-plugin" }, {})
     vim.notify = orig
     t.assert.truthy(warned)
   end)
@@ -287,7 +287,7 @@ t.describe("the dashboard `L` toggle (dash_paq.dashboard.ui.operations.toggle_de
   -- flip must pick the dev dir, not (a no-op) itself.
   t.it("upstream -> dev flip: 2 options, flips to the dev checkout and saves its path", function()
     local restarted = false
-    operations.toggle_dev(nil, { name = "upstreamplug" }, {
+    operations.toggle_dev({ name = "upstreamplug" }, {
       confirm = function()
         return 1 -- "Yes"
       end,
@@ -313,7 +313,7 @@ t.describe("the dashboard `L` toggle (dash_paq.dashboard.ui.operations.toggle_de
       warned = msg
     end
     state.dev_plugin_paths_cache.upstreamplug = realpath(upstream_dev_dir)
-    local ok, err = pcall(operations.toggle_dev, nil, { name = "upstreamplug" }, {
+    local ok, err = pcall(operations.toggle_dev, { name = "upstreamplug" }, {
       confirm = function()
         prompted = true
         return 2
@@ -340,7 +340,7 @@ t.describe("the dashboard `L` toggle (dash_paq.dashboard.ui.operations.toggle_de
         errored = true
       end
     end
-    operations.toggle_dev(nil, { name = "badpathplug" }, {
+    operations.toggle_dev({ name = "badpathplug" }, {
       confirm = function()
         return 1 -- "Yes"
       end,

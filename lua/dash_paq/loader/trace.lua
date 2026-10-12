@@ -65,8 +65,8 @@ function M.setup(ctx)
   local function trace(args)
     local filter = args[1] or ""
     local lines = {
-      "vim.pack trace",
-      "status | plugin | loaded_by | loaded_at | count | triggers",
+      "DashPaq trace",
+      "status | plugin | loaded_by | loaded_at | triggers",
       "",
     }
 
@@ -77,16 +77,8 @@ function M.setup(ctx)
         local status = state.status == "loaded" and "loaded " or "defer  "
         local loaded_by = state.loaded_by or "-"
         local loaded_at = state.loaded_at or "-"
-        local count = tostring(state.load_count or 0)
-        lines[#lines + 1] = string.format(
-          "%s | %s | %s | %s | %s | %s",
-          status,
-          entry.name,
-          loaded_by,
-          loaded_at,
-          count,
-          trigger_summary(meta)
-        )
+        lines[#lines + 1] =
+          string.format("%s | %s | %s | %s | %s", status, entry.name, loaded_by, loaded_at, trigger_summary(meta))
       end
     end
 

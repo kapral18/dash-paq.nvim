@@ -15,6 +15,7 @@ require("dash_paq").setup({
 local view = require("dash_paq.dashboard.ui.view")
 local refresh = require("dash_paq.dashboard.ui.refresh")
 local report = require("dash_paq.dashboard.report")
+local state = require("dash_paq.dashboard.state")
 
 local orig_pipeline = report.run_refresh_pipeline
 local orig_defer_fn = vim.defer_fn
@@ -38,12 +39,13 @@ end
 
 -- Runs one op against a hand-driven pipeline. Returns a handle with the captured callbacks/timers/notifications.
 local function start_op(spec_extra)
-  local h = { timers = {}, notified = {}, applied = {}, batches = {}, finalized = 0, counts = nil }
+  local h = { timers = {}, delays = {}, notified = {}, applied = {}, batches = {}, finalized = 0, counts = nil }
   report.run_refresh_pipeline = function(_, _, on_each, on_done)
     h.on_each, h.on_done = on_each, on_done
   end
-  vim.defer_fn = function(fn)
+  vim.defer_fn = function(fn, ms)
     h.timers[#h.timers + 1] = fn
+    h.delays[#h.delays + 1] = ms
   end
   vim.notify = function(msg, level)
     h.notified[#h.notified + 1] = { msg = msg, level = level }
@@ -115,6 +117,63 @@ t.describe("results delivered in separate callbacks of one event-loop pass", fun
   t.it("tallies each row once and releases the busy flag", function()
     t.assert.same({ update = 0, same = 3, error = 0 }, h.counts)
     t.assert.equals(false, h.ctx.online_check_running)
+  end)
+end)
+
+t.describe("an update result arriving while the cursor just moved", function()
+  local h = start_op()
+  -- Stamped in the future so a slow machine cannot outlast the idle window before `on_each` runs.
+  state.last_cursor_move = vim.uv.hrtime() + 1e9
+  h.on_each(update_result("u1"), 1, 1)
+  h.on_done()
+  local applied_while_moving = #h.applied
+  local hold_ms = h.delays[1]
+  state.last_cursor_move = vim.uv.hrtime() - 1e9
+  while #h.timers > 0 do
+    fire_timer(h)
+  end
+  state.last_cursor_move = nil
+  restore()
+
+  t.it("holds the apply and retries once the cursor has been still for the idle window", function()
+    t.assert.equals(0, applied_while_moving)
+    -- Stamped 1 s ahead: the hold is that second plus the 300 ms window, less any elapsed time.
+    t.assert.truthy(hold_ms > 300 and hold_ms <= 1300)
+  end)
+
+  t.it("applies the row once the cursor is idle, then finalizes", function()
+    t.assert.same({ "u1" }, h.applied)
+    t.assert.equals(1, h.finalized)
+  end)
+end)
+
+t.describe("the dashboard's cursor stamp", function()
+  local bindings = require("dash_paq.dashboard.ui.bindings")
+  local ctx = new_ctx()
+  vim.api.nvim_buf_set_lines(ctx.bufnr, 0, -1, false, { "a", "b", "c" })
+  local win = vim.api.nvim_open_win(ctx.bufnr, true, { relative = "editor", row = 0, col = 0, width = 20, height = 5 })
+  bindings.attach(ctx)
+  vim.api.nvim_win_set_cursor(win, { 2, 0 })
+  vim.cmd("doautocmd CursorMoved")
+  local first = state.last_cursor_move
+  -- A spinner frame rewrites the cursor's row in place, which also fires CursorMoved.
+  vim.bo[ctx.bufnr].modifiable = true
+  vim.api.nvim_buf_set_lines(ctx.bufnr, 1, 2, false, { "b2" })
+  vim.cmd("doautocmd CursorMoved")
+  local after_rewrite = state.last_cursor_move
+  vim.api.nvim_win_set_cursor(win, { 3, 0 })
+  vim.cmd("doautocmd CursorMoved")
+  local after_move = state.last_cursor_move
+  vim.api.nvim_win_close(win, true)
+  state.last_cursor_move = nil
+
+  t.it("stamps when the cursor line changes", function()
+    t.assert.truthy(first ~= nil)
+    t.assert.truthy(after_move ~= first)
+  end)
+
+  t.it("does not restamp when only the cursor's row is rewritten", function()
+    t.assert.equals(first, after_rewrite)
   end)
 end)
 

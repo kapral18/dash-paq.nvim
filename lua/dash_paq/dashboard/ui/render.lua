@@ -6,7 +6,7 @@ local M = {}
 
 local dashboard_ns = vim.api.nvim_create_namespace("dash_paq.dashboard")
 
-local function ensure_highlights()
+function M.ensure_highlights()
   local set_hl = vim.api.nvim_set_hl
   set_hl(0, "DashPaqTitle", { default = true, link = "Title" })
   -- FILTERED banner: warning-styled so a narrowed list is unmistakable.
@@ -89,18 +89,10 @@ end
 -- Live progress for an in-flight refresh, on its own dedicated header line so it
 -- stays visible in a narrow pane instead of being clipped off the right edge.
 local function progress_segments(ctx)
-  local progress = ctx.online_check_progress
-  local detail
-  if type(progress) == "table" and progress.phase == "status" then
-    if tonumber(progress.total) and progress.total > 0 then
-      detail = string.format("status %d/%d", tonumber(progress.done) or 0, progress.total)
-    else
-      detail = "status"
-    end
-  elseif type(progress) == "table" and tonumber(progress.total) and progress.total > 0 then
-    detail = string.format("fetch %d/%d", tonumber(progress.done) or 0, progress.total)
-  else
-    detail = "starting…"
+  local progress = ctx.online_check_progress or {}
+  local detail = "status"
+  if (tonumber(progress.total) or 0) > 0 then
+    detail = string.format("status %d/%d", tonumber(progress.done) or 0, progress.total)
   end
   local marker = ctx.use_nerd_font and " " or ">>"
   return {
@@ -184,6 +176,7 @@ local function build_row_line(ctx, row)
   })
 end
 
+-- Status -> highlight group, shared with the details popup.
 local status_hl = {
   update = "DashPaqStatusUpdate",
   same = "DashPaqStatusSame",
@@ -194,6 +187,7 @@ local status_hl = {
   risky = "DashPaqStatusRisky",
   ["local"] = "DashPaqStatusLocal",
 }
+M.status_hl = status_hl
 
 -- Apply the selection/status/risk extmarks for a single data row at `line_no`
 -- (1-based). Shared by the full-table and per-row render paths.
@@ -504,14 +498,14 @@ local function build_lines(ctx)
   if #visible == 0 then
     -- Distinguish "nothing installed" from "everything filtered out": when a
     -- filter is active, say so and point at the keys that reset it.
-    if filter_is_active(ctx) and (#(ctx.rows or {}) > 0) then
+    if #(ctx.rows or {}) == 0 then
+      lines[#lines + 1] = "(No plugins installed)"
+    else
       lines[#lines + 1] = string.format(
         "(0 of %d shown — %s hides the rest; press c to clear search, f to cycle filter)",
         #(ctx.rows or {}),
         active_filter_desc(ctx) or "filter"
       )
-    else
-      lines[#lines + 1] = "(No plugins match current filter/search)"
     end
   end
   return lines
@@ -576,7 +570,7 @@ function M.render_row(ctx, name)
     return
   end
 
-  ensure_highlights()
+  M.ensure_highlights()
   local line, ranges = build_row_line(ctx, row)
   ctx.row_ranges_by_line[line_no] = ranges
   vim.bo[ctx.bufnr].modifiable = true
@@ -601,7 +595,7 @@ function M.render_header(ctx)
     M.render(ctx)
     return
   end
-  ensure_highlights()
+  M.ensure_highlights()
   vim.bo[ctx.bufnr].modifiable = true
   pcall(vim.api.nvim_buf_set_lines, ctx.bufnr, 0, prev_count, false, header)
   vim.bo[ctx.bufnr].modifiable = false
@@ -614,7 +608,7 @@ function M.render(ctx)
   if not vim.api.nvim_buf_is_valid(ctx.bufnr) then
     return
   end
-  ensure_highlights()
+  M.ensure_highlights()
   local lines = build_lines(ctx)
   vim.bo[ctx.bufnr].modifiable = true
   vim.api.nvim_buf_set_lines(ctx.bufnr, 0, -1, false, lines)

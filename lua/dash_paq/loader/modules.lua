@@ -6,12 +6,8 @@ local M = {}
 
 local triggers_mod = require("dash_paq.loader.triggers")
 
--- The active `setup()` call's state (`entries`/`entry_state`/`load_entry`)
--- the installed searcher below reads from. Replaced wholesale by every
--- `M.install` call (re-setup builds fresh `entries`/`entry_state`/
--- `load_entry` closures anyway), so the one searcher ever inserted into
--- `package.loaders` (see `installed` below) always acts on the latest
--- `setup()`, never a stale earlier one.
+-- The loader state (`entries`/`sorted`/`entry_state`/`load_entry`) the
+-- searcher below reads from; set once by `M.install`.
 local current = nil
 
 -- Top-level module names `entry`'s resolved root provides: the `lua/` dir's
@@ -52,13 +48,13 @@ end
 -- Built lazily on the first `require()` miss (never scanned at startup):
 -- one non-recursive `fs_scandir` per enabled, not-yet-loaded entry --
 -- including one mid-load, whose dependencies may require it (see
--- `searcher`). `current.sorted` (not `pairs(current.entries)`) keeps the
+-- `searcher`). `ctx.sorted` (not `pairs(ctx.entries)`) keeps the
 -- "first entry wins" tie-break (two entries providing the same top-level
 -- name) deterministic.
-local function build_top_map()
+local function build_top_map(ctx)
   local map = {}
-  for _, entry in ipairs(current.sorted) do
-    local state = current.entry_state[entry.name]
+  for _, entry in ipairs(ctx.sorted) do
+    local state = ctx.entry_state[entry.name]
     if entry.enabled and state and state.status ~= "loaded" then
       for _, top in ipairs(top_level_modules(entry)) do
         if not map[top] then
@@ -104,7 +100,7 @@ local function searcher(modname)
     return nil
   end
   if not current.top_map then
-    current.top_map = build_top_map()
+    current.top_map = build_top_map(current)
   end
   local top = modname:match("^[^.]+")
   local entry_name = top and current.top_map[top]
@@ -132,12 +128,8 @@ local function searcher(modname)
   return string.format("\n\tdash_paq: loaded entry %q for %s, deferring to rtp search", entry_name, modname)
 end
 
-local installed = false
-
--- `opts`: `{ entries, sorted, entry_state, load_entry }` -- this `setup()`
--- call's own loader tables/closure. Replaces `current` every call; inserts
--- the searcher into `package.loaders` at most once per process, so calling
--- this twice (re-setup) never stacks a second searcher.
+-- `opts`: `{ entries, sorted, entry_state, load_entry }` -- the loader's own
+-- tables/closure. Called once, from the one allowed `setup()`.
 function M.install(opts)
   current = {
     entries = opts.entries,
@@ -146,10 +138,6 @@ function M.install(opts)
     load_entry = opts.load_entry,
     top_map = nil,
   }
-  if installed then
-    return
-  end
-  installed = true
   -- $VIMRUNTIME/lua/vim/_init_packages.lua inserts Neovim's own rtp
   -- searcher, `vim._load_package`, at `package.loaders[2]` (`table.insert
   -- (package.loaders, 2, vim._load_package)`, right after the stock

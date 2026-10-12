@@ -20,12 +20,12 @@ local errplug_dir = dirfixture.new("errplug", { ["plugin/init.lua"] = "error('bo
 
 -- cmd-triggered entries defining a real Vimscript `command X`: :X must run it after load, for dir and src both.
 local vimcmddir_dir = dirfixture.new("vimcmddir", {
-  ["plugin/init.vim"] = "command VimCmdDir let g:pc_vimcmddir_ran = get(g:, 'pc_vimcmddir_ran', 0) + 1",
+  ["plugin/init.vim"] = "command VimCmdDir let g:dash_paq_vimcmddir_ran = get(g:, 'dash_paq_vimcmddir_ran', 0) + 1",
 })
 
 local vimcmdsrc_remote = gitfixture.new_remote("vimcmdsrc")
 gitfixture.commit(vimcmdsrc_remote, "feat: initial", {
-  ["plugin/init.vim"] = "command VimCmdSrc let g:pc_vimcmdsrc_ran = get(g:, 'pc_vimcmdsrc_ran', 0) + 1",
+  ["plugin/init.vim"] = "command VimCmdSrc let g:dash_paq_vimcmdsrc_ran = get(g:, 'dash_paq_vimcmdsrc_ran', 0) + 1",
 })
 gitfixture.push(vimcmdsrc_remote)
 
@@ -34,7 +34,7 @@ local ftdetect_defer_dir =
   dirfixture.new("ftdetectdeferplug", dirfixture.marker_plugin_files("ftdetectdeferplug-loaded"))
 vim.fn.mkdir(vim.fs.joinpath(ftdetect_defer_dir, "ftdetect"), "p")
 vim.fn.writefile(
-  { [[vim.filetype.add({ extension = { pcdeferfixture = "pcdeferfixture" } })]] },
+  { [[vim.filetype.add({ extension = { dashpaqdeferfixture = "dashpaqdeferfixture" } })]] },
   vim.fs.joinpath(ftdetect_defer_dir, "ftdetect", "custom.lua")
 )
 
@@ -44,12 +44,12 @@ local ftplugin_defer_dir = dirfixture.new("ftpluginplug", dirfixture.marker_plug
 vim.fn.mkdir(vim.fs.joinpath(ftplugin_defer_dir, "ftplugin"), "p")
 vim.fn.mkdir(vim.fs.joinpath(ftplugin_defer_dir, "after", "ftplugin"), "p")
 vim.fn.writefile(
-  { "_G.PC_FTPLUGIN_COUNT = (_G.PC_FTPLUGIN_COUNT or 0) + 1" },
-  vim.fs.joinpath(ftplugin_defer_dir, "ftplugin", "pcftpluginlang.lua")
+  { "_G.DASH_PAQ_FTPLUGIN_COUNT = (_G.DASH_PAQ_FTPLUGIN_COUNT or 0) + 1" },
+  vim.fs.joinpath(ftplugin_defer_dir, "ftplugin", "dashpaqftpluginlang.lua")
 )
 vim.fn.writefile(
-  { "_G.PC_AFTER_FTPLUGIN_COUNT = (_G.PC_AFTER_FTPLUGIN_COUNT or 0) + 1" },
-  vim.fs.joinpath(ftplugin_defer_dir, "after", "ftplugin", "pcftpluginlang.lua")
+  { "_G.DASH_PAQ_AFTER_FTPLUGIN_COUNT = (_G.DASH_PAQ_AFTER_FTPLUGIN_COUNT or 0) + 1" },
+  vim.fs.joinpath(ftplugin_defer_dir, "after", "ftplugin", "dashpaqftpluginlang.lua")
 )
 
 -- Deferred entry triggered by a non-file pattern-match event (ColorScheme): the replay must re-resolve via
@@ -59,9 +59,9 @@ local colorscheme_handler_count = 0
 
 -- keys with a string rhs and expr=true: the stub must set the real expr mapping first, not feed the raw text.
 local expr_keys_dir = dirfixture.new("exprkeysplug", dirfixture.marker_plugin_files("exprkeysplug-loaded"))
-_G.PCX_COUNT = 0
-_G.PCX = function()
-  _G.PCX_COUNT = _G.PCX_COUNT + 1
+_G.DASH_PAQ_X_COUNT = 0
+_G.DASH_PAQ_X = function()
+  _G.DASH_PAQ_X_COUNT = _G.DASH_PAQ_X_COUNT + 1
   return ""
 end
 
@@ -84,7 +84,9 @@ vim.api.nvim_create_autocmd("User", {
 
 -- A stock Vimscript autocmd (no id/callback) for the same event bufplug defers on: nvim_get_autocmds never
 -- populates `id` for it, so a snapshot keyed on au.id (not group) would raise "table index is nil".
-vim.cmd("autocmd BufEnter * let g:pc_test_vimscript_bufenter = get(g:, 'pc_test_vimscript_bufenter', 0) + 1")
+vim.cmd(
+  "autocmd BufEnter * let g:dash_paq_test_vimscript_bufenter = get(g:, 'dash_paq_test_vimscript_bufenter', 0) + 1"
+)
 
 require("dash_paq").setup({
   spec = {
@@ -138,7 +140,7 @@ require("dash_paq").setup({
         -- Patterned + once handler: replay must honor both (matching buffer, first time only).
         vim.api.nvim_create_autocmd("BufEnter", {
           group = vim.api.nvim_create_augroup("fixture_bufplug", { clear = true }),
-          pattern = "*.pcmdfixture",
+          pattern = "*.dashpaqmdfixture",
           once = true,
           callback = function()
             md_handler_count = md_handler_count + 1
@@ -151,7 +153,7 @@ require("dash_paq").setup({
       -- load or it would shadow the real mapping instead of the replay reaching it.
       dir = ft_keys_dir,
       name = "ftkeysplug",
-      keys = { { "<F6>", ft = "pcfixturelang" } },
+      keys = { { "<F6>", ft = "dashpaqfixturelang" } },
       config = function()
         vim.keymap.set("n", "<F6>", function()
           table.insert(_G.DASH_PAQ_TEST_LOG, "ftkeysplug-global-mapping-ran")
@@ -167,12 +169,12 @@ require("dash_paq").setup({
     {
       dir = ftdetect_defer_dir,
       name = "ftdetectdeferplug",
-      ft = "pcdeferfixture",
+      ft = "dashpaqdeferfixture",
     },
     {
       dir = ftplugin_defer_dir,
       name = "ftpluginplug",
-      ft = "pcftpluginlang",
+      ft = "dashpaqftpluginlang",
     },
     {
       dir = colorscheme_dir,
@@ -181,7 +183,7 @@ require("dash_paq").setup({
       config = function()
         vim.api.nvim_create_autocmd("ColorScheme", {
           group = vim.api.nvim_create_augroup("fixture_colorschemeplug", { clear = true }),
-          pattern = "pcfixturescheme",
+          pattern = "dashpaqfixturescheme",
           callback = function()
             colorscheme_handler_count = colorscheme_handler_count + 1
           end,
@@ -191,7 +193,7 @@ require("dash_paq").setup({
     {
       dir = expr_keys_dir,
       name = "exprkeysplug",
-      keys = { { "<F7>", "v:lua.PCX()", expr = true } },
+      keys = { { "<F7>", "v:lua.DASH_PAQ_X()", expr = true } },
     },
     {
       dir = noremap_keys_dir,
@@ -296,16 +298,16 @@ end)
 t.describe("a BufEnter trigger fires alongside a pre-existing Vimscript autocmd for the same event", function()
   -- Opened first, and does not match bufplug's own pattern; a replay bypassing pattern/buffer matching would
   -- incorrectly fire on this buffer too.
-  vim.cmd("edit fixture-nomatch.pctxtfixture")
+  vim.cmd("edit fixture-nomatch.dashpaqtxtfixture")
 
   t.it("does not replay the plugin's patterned handler for a non-matching buffer", function()
     t.assert.equals(0, md_handler_count)
   end)
 
-  vim.cmd("edit fixture.pcmdfixture")
+  vim.cmd("edit fixture.dashpaqmdfixture")
 
   t.it("does not error despite the Vimscript (id-less) autocmd sharing the event", function()
-    t.assert.truthy(vim.g.pc_test_vimscript_bufenter ~= nil and vim.g.pc_test_vimscript_bufenter > 0)
+    t.assert.truthy(vim.g.dash_paq_test_vimscript_bufenter ~= nil and vim.g.dash_paq_test_vimscript_bufenter > 0)
   end)
 
   t.it("loads the deferred plugin", function()
@@ -317,14 +319,14 @@ t.describe("a BufEnter trigger fires alongside a pre-existing Vimscript autocmd 
   end)
 
   t.it("does not fire that handler again for a non-matching buffer (`once` still honored)", function()
-    vim.cmd("edit fixture2.pctxtfixture")
+    vim.cmd("edit fixture2.dashpaqtxtfixture")
     t.assert.equals(1, md_handler_count)
   end)
 end)
 
 t.describe("an ft-scoped lhs-only key fires and the plugin maps the lhs globally", function()
   -- Sets filetype in place (fires FileType only, no BufEnter), independent of the BufEnter fixture above.
-  vim.bo.filetype = "pcfixturelang"
+  vim.bo.filetype = "dashpaqfixturelang"
   vim.api.nvim_feedkeys(vim.keycode("<F6>"), "mtx", false)
 
   t.it("loads the plugin", function()
@@ -353,31 +355,31 @@ end)
 t.describe("an ft-deferred entry has its own native ftplugin/ and after/ftplugin/", function()
   local buf1 = vim.api.nvim_create_buf(true, false)
   vim.api.nvim_set_current_buf(buf1)
-  vim.bo[buf1].filetype = "pcftpluginlang"
+  vim.bo[buf1].filetype = "dashpaqftpluginlang"
 
   t.it("loads the plugin on the first matching buffer", function()
     t.assert.truthy(vim.tbl_contains(_G.DASH_PAQ_TEST_LOG, "ftpluginplug-loaded"))
   end)
 
   t.it("sources ftplugin/ and after/ftplugin/ exactly once for the first buffer", function()
-    t.assert.equals(1, _G.PC_FTPLUGIN_COUNT)
-    t.assert.equals(1, _G.PC_AFTER_FTPLUGIN_COUNT)
+    t.assert.equals(1, _G.DASH_PAQ_FTPLUGIN_COUNT)
+    t.assert.equals(1, _G.DASH_PAQ_AFTER_FTPLUGIN_COUNT)
   end)
 
   -- The ft trigger is once=true and already gone; this buffer's sourcing must come from Neovim's own native
   -- filetypeplugin handling now that the entry is on rtp, not from any further replay.
   local buf2 = vim.api.nvim_create_buf(true, false)
   vim.api.nvim_set_current_buf(buf2)
-  vim.bo[buf2].filetype = "pcftpluginlang"
+  vim.bo[buf2].filetype = "dashpaqftpluginlang"
 
   t.it("sources ftplugin/ and after/ftplugin/ exactly once more for the second buffer", function()
-    t.assert.equals(2, _G.PC_FTPLUGIN_COUNT)
-    t.assert.equals(2, _G.PC_AFTER_FTPLUGIN_COUNT)
+    t.assert.equals(2, _G.DASH_PAQ_FTPLUGIN_COUNT)
+    t.assert.equals(2, _G.DASH_PAQ_AFTER_FTPLUGIN_COUNT)
   end)
 end)
 
 t.describe("a pattern-matched (non-`User`) event trigger fires", function()
-  vim.api.nvim_exec_autocmds("ColorScheme", { pattern = "pcfixturescheme" })
+  vim.api.nvim_exec_autocmds("ColorScheme", { pattern = "dashpaqfixturescheme" })
 
   t.it("loads the deferred plugin", function()
     t.assert.truthy(vim.tbl_contains(_G.DASH_PAQ_TEST_LOG, "colorschemeplug-loaded"))
@@ -390,10 +392,10 @@ end)
 
 t.describe("an ft-deferred entry's own ftdetect/ defines its filetype", function()
   -- If ftdetect/ were sourced only on load (not at trigger registration), the ft trigger could never fire.
-  vim.cmd("edit fixture.pcdeferfixture")
+  vim.cmd("edit fixture.dashpaqdeferfixture")
 
   t.it("detects the entry's own custom filetype", function()
-    t.assert.equals("pcdeferfixture", vim.bo.filetype)
+    t.assert.equals("dashpaqdeferfixture", vim.bo.filetype)
   end)
 
   t.it("loads the entry once its own filetype triggers", function()
@@ -409,14 +411,14 @@ t.describe("a `keys` entry with a string expr rhs is pressed", function()
   end)
 
   t.it("evaluates the real expr mapping on the first press, not feed the raw expression text", function()
-    t.assert.equals(1, _G.PCX_COUNT)
+    t.assert.equals(1, _G.DASH_PAQ_X_COUNT)
   end)
 
   vim.api.nvim_feedkeys(vim.keycode("<F7>"), "mtx", false)
   vim.api.nvim_feedkeys(vim.keycode("<F7>"), "mtx", false)
 
   t.it("keeps evaluating it on every later press", function()
-    t.assert.equals(3, _G.PCX_COUNT)
+    t.assert.equals(3, _G.DASH_PAQ_X_COUNT)
   end)
 end)
 
@@ -487,13 +489,13 @@ t.describe("a cmd-triggered entry's plugin/ defines the real command with Vimscr
   vim.cmd("VimCmdDir")
 
   t.it("runs the dir entry's real Vimscript-defined command after load", function()
-    t.assert.equals(1, vim.g.pc_vimcmddir_ran)
+    t.assert.equals(1, vim.g.dash_paq_vimcmddir_ran)
   end)
 
   vim.cmd("VimCmdSrc")
 
   t.it("runs the src entry's real Vimscript-defined command after load", function()
-    t.assert.equals(1, vim.g.pc_vimcmdsrc_ran)
+    t.assert.equals(1, vim.g.dash_paq_vimcmdsrc_ran)
   end)
 end)
 

@@ -3,6 +3,9 @@
 -- the first time they fire.
 local M = {}
 
+local fs = require("dash_paq.fs")
+local notify = require("dash_paq.notify")
+
 -- Local dev directory when present, else the `vim.pack`-managed clone path,
 -- else a `dir` spec. Exported for `loader/init.lua`'s rtp insertion too.
 local function resolve_root(entry)
@@ -68,16 +71,10 @@ local function replay_new_groups(event_name, before_groups, ev)
   end
 end
 
-local function default_notify_err(msg)
-  vim.schedule(function()
-    vim.notify(msg, vim.log.levels.ERROR)
-  end)
-end
-
 function M.new(opts)
   opts = opts or {}
   local group = opts.group
-  local notify_err = opts.notify_err or default_notify_err
+  local notify_err = opts.notify_err or notify.err
 
   local self = {}
   local command_wrappers = {}
@@ -86,21 +83,13 @@ function M.new(opts)
   -- path; the only reliable way to dedupe native vs. self sourcing.
   local recorded_after_paths = {} ---@type table<string, boolean>
 
-  -- Resolves symlinks so a dev symlink and its real path key the same way.
-  local function normalized_real_path(path)
-    if type(path) ~= "string" or path == "" then
-      return nil
-    end
-    local real = vim.uv.fs_realpath(path)
-    return vim.fs.normalize(real or path)
-  end
-
   -- Live before Neovim's own native load-plugins step ever runs.
   vim.api.nvim_create_autocmd("SourcePost", {
     group = group,
     pattern = "*/after/plugin/*",
     callback = function(ev)
-      local p = normalized_real_path(ev.match or ev.file)
+      -- Real path, so a dev symlink and its target key the same way.
+      local p = fs.real_path(ev.match or ev.file)
       if p then
         recorded_after_paths[p] = true
       end
@@ -238,7 +227,7 @@ function M.new(opts)
     local after_paths = vim.fn.glob(root .. "/after/plugin/**/*.{vim,lua}", false, true)
     for _, p in ipairs(after_paths) do
       if type(p) == "string" and p ~= "" then
-        local real = normalized_real_path(p)
+        local real = fs.real_path(p)
         if not (real and recorded_after_paths[real]) then
           local ok, err = pcall(vim.cmd.source, { p, magic = { file = false } })
           if not ok then
@@ -262,13 +251,13 @@ function M.new(opts)
     end
   end
 
-  function self.apply_loaded_key(entry_name, key)
+  function self.apply_loaded_key(key)
     local real_opts = vim.deepcopy(key.opts) or {}
     pcall(vim.keymap.set, key.mode, key.lhs, key.rhs, real_opts)
   end
 
   -- Sets it in every open buffer of `key.ft`, plus an untracked `FileType` autocmd for every later buffer.
-  function self.apply_loaded_ft_key(entry_name, key)
+  function self.apply_loaded_ft_key(key)
     local patterns = type(key.ft) == "table" and key.ft or { key.ft }
     local fts = {}
     for _, ft in ipairs(patterns) do

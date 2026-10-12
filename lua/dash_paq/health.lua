@@ -18,8 +18,8 @@ function M.check()
   local health = vim.health
   health.start("dash-paq.nvim")
 
-  local ok_pc, pc = pcall(require, "dash_paq")
-  if ok_pc and type(pc.is_configured) == "function" and pc.is_configured() then
+  local ok, dash_paq = pcall(require, "dash_paq")
+  if ok and type(dash_paq.is_configured) == "function" and dash_paq.is_configured() then
     health.ok("setup() has been called")
   else
     health.error("setup() has not been called; call require('dash_paq').setup(opts)")
@@ -45,7 +45,7 @@ function M.check()
     health.error("git not found on PATH; required for install/update/version-policy/dashboard analysis")
   end
 
-  local state_dir = vim.fs.joinpath(vim.fn.stdpath("state"), "dash-paq")
+  local state_dir = require("dash_paq.fs").state_dir()
   pcall(vim.fn.mkdir, state_dir, "p")
   -- `isdirectory` only proves the directory exists, not that it is writable
   -- (e.g. a read-only mount); `filewritable() == 2` is the directory result.

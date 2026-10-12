@@ -17,19 +17,19 @@ local ftdefer_dir_root = fresh_dir("ftdefer-dir")
 dirfixture.write(
   ftdefer_dir_root,
   "plugin/init.lua",
-  [[_G.PC.counts.ftdefer_dir_plugin = (_G.PC.counts.ftdefer_dir_plugin or 0) + 1]]
+  [[_G.DASH_PAQ_TEST.counts.ftdefer_dir_plugin = (_G.DASH_PAQ_TEST.counts.ftdefer_dir_plugin or 0) + 1]]
 )
 dirfixture.write(
   ftdefer_dir_root,
   "after/plugin/init.lua",
-  [[_G.PC.counts.ftdefer_dir_after = (_G.PC.counts.ftdefer_dir_after or 0) + 1]]
+  [[_G.DASH_PAQ_TEST.counts.ftdefer_dir_after = (_G.DASH_PAQ_TEST.counts.ftdefer_dir_after or 0) + 1]]
 )
 
 -- Same scenario as a src entry (resolved via vim.pack.get, not a literal dir path).
 local ftdefer_src = gitfixture.new_remote("deferwin-ftdefer-src")
 gitfixture.commit(ftdefer_src, "feat: initial", {
-  ["plugin/init.lua"] = [[_G.PC.counts.ftdefer_src_plugin = (_G.PC.counts.ftdefer_src_plugin or 0) + 1]],
-  ["after/plugin/init.lua"] = [[_G.PC.counts.ftdefer_src_after = (_G.PC.counts.ftdefer_src_after or 0) + 1]],
+  ["plugin/init.lua"] = [[_G.DASH_PAQ_TEST.counts.ftdefer_src_plugin = (_G.DASH_PAQ_TEST.counts.ftdefer_src_plugin or 0) + 1]],
+  ["after/plugin/init.lua"] = [[_G.DASH_PAQ_TEST.counts.ftdefer_src_after = (_G.DASH_PAQ_TEST.counts.ftdefer_src_after or 0) + 1]],
 })
 gitfixture.push(ftdefer_src)
 
@@ -38,12 +38,12 @@ local evtdefer_dir_root = fresh_dir("evtdefer-dir")
 dirfixture.write(
   evtdefer_dir_root,
   "plugin/init.lua",
-  [[_G.PC.counts.evtdefer_dir_plugin = (_G.PC.counts.evtdefer_dir_plugin or 0) + 1]]
+  [[_G.DASH_PAQ_TEST.counts.evtdefer_dir_plugin = (_G.DASH_PAQ_TEST.counts.evtdefer_dir_plugin or 0) + 1]]
 )
 dirfixture.write(
   evtdefer_dir_root,
   "after/plugin/init.lua",
-  [[_G.PC.counts.evtdefer_dir_after = (_G.PC.counts.evtdefer_dir_after or 0) + 1]]
+  [[_G.DASH_PAQ_TEST.counts.evtdefer_dir_after = (_G.DASH_PAQ_TEST.counts.evtdefer_dir_after or 0) + 1]]
 )
 
 -- cmd trigger after VimEnter: sources immediately.
@@ -51,12 +51,12 @@ local postvim_dir_root = fresh_dir("postvim-dir")
 dirfixture.write(
   postvim_dir_root,
   "plugin/init.lua",
-  [[_G.PC.counts.postvim_plugin = (_G.PC.counts.postvim_plugin or 0) + 1]]
+  [[_G.DASH_PAQ_TEST.counts.postvim_plugin = (_G.DASH_PAQ_TEST.counts.postvim_plugin or 0) + 1]]
 )
 dirfixture.write(
   postvim_dir_root,
   "after/plugin/init.lua",
-  [[_G.PC.counts.postvim_after = (_G.PC.counts.postvim_after or 0) + 1]]
+  [[_G.DASH_PAQ_TEST.counts.postvim_after = (_G.DASH_PAQ_TEST.counts.postvim_after or 0) + 1]]
 )
 
 -- Event-deferred entry whose own after/plugin/** registers grouped BufReadPost+FileType autocmds; both must fire
@@ -68,14 +68,14 @@ dirfixture.write(grouped_argv_root, "after/plugin/init.lua", {
   "  group = grp,",
   "  pattern = '*.lua',",
   "  callback = function()",
-  "    _G.PC.counts.grouped_bufreadpost = (_G.PC.counts.grouped_bufreadpost or 0) + 1",
+  "    _G.DASH_PAQ_TEST.counts.grouped_bufreadpost = (_G.DASH_PAQ_TEST.counts.grouped_bufreadpost or 0) + 1",
   "  end,",
   "})",
   "vim.api.nvim_create_autocmd('FileType', {",
   "  group = grp,",
   "  pattern = 'lua',",
   "  callback = function()",
-  "    _G.PC.counts.grouped_filetype = (_G.PC.counts.grouped_filetype or 0) + 1",
+  "    _G.DASH_PAQ_TEST.counts.grouped_filetype = (_G.DASH_PAQ_TEST.counts.grouped_filetype or 0) + 1",
   "  end,",
   "})",
 })
@@ -85,7 +85,7 @@ local nested_outer_root = fresh_dir("nested-outer-dir")
 dirfixture.write(
   nested_outer_root,
   "plugin/init.lua",
-  [[vim.api.nvim_exec_autocmds('User', { pattern = 'PCNestedTrigger' })]]
+  [[vim.api.nvim_exec_autocmds('User', { pattern = 'DashPaqNestedTrigger' })]]
 )
 
 -- User-event-deferred entry loaded from nested_outer_root's plugin/init.lua above; its root lands on 'runtimepath'
@@ -94,18 +94,18 @@ local nested_evt_root = fresh_dir("nested-evt-dir")
 dirfixture.write(
   nested_evt_root,
   "plugin/init.lua",
-  [[_G.PC.counts.nested_plugin = (_G.PC.counts.nested_plugin or 0) + 1]]
+  [[_G.DASH_PAQ_TEST.counts.nested_plugin = (_G.DASH_PAQ_TEST.counts.nested_plugin or 0) + 1]]
 )
 dirfixture.write(
   nested_evt_root,
   "after/plugin/init.lua",
-  [[_G.PC.counts.nested_after = (_G.PC.counts.nested_after or 0) + 1]]
+  [[_G.DASH_PAQ_TEST.counts.nested_after = (_G.DASH_PAQ_TEST.counts.nested_after or 0) + 1]]
 )
 
 -- Reused by both the ft-deferred entries above (FileType trigger) and the grouped-autocmd entry (BufReadPost).
 local lua_argv_file = fresh_dir("argv-lua") .. "/sample.lua"
 vim.fn.writefile({ "-- sample" }, lua_argv_file)
-local brp_argv_file = fresh_dir("argv-brp") .. "/sample.pcbrp"
+local brp_argv_file = fresh_dir("argv-brp") .. "/sample.dashpaqbrp"
 vim.fn.writefile({ "x" }, brp_argv_file)
 
 local out_path = fresh_dir("out") .. "/result.json"
@@ -114,7 +114,7 @@ local init_lines = {
   "vim.opt.shadafile = 'NONE'",
   "vim.opt.swapfile = false",
   string.format("vim.opt.rtp:prepend(%q)", ROOT),
-  "_G.PC = { counts = {} }",
+  "_G.DASH_PAQ_TEST = { counts = {} }",
   "require('dash_paq').setup({",
   "  dashboard = false,",
   "  version_policy = false,",
@@ -122,12 +122,12 @@ local init_lines = {
   string.format("    { dir = %q, name = 'dw_ftdefer_dir', ft = 'lua' },", ftdefer_dir_root),
   string.format("    { src = %q, name = 'dw_ftdefer_src', ft = 'lua' },", ftdefer_src.src),
   string.format(
-    "    { dir = %q, name = 'dw_evtdefer_dir', event = { 'BufReadPost', pattern = '*.pcbrp' } },",
+    "    { dir = %q, name = 'dw_evtdefer_dir', event = { 'BufReadPost', pattern = '*.dashpaqbrp' } },",
     evtdefer_dir_root
   ),
   string.format(
-    "    { dir = %q, name = 'dw_postvim_dir', cmd = 'PcPostVimCmd', "
-      .. "config = function() vim.api.nvim_create_user_command('PcPostVimCmd', function() end, {}) end },",
+    "    { dir = %q, name = 'dw_postvim_dir', cmd = 'DashPaqPostVimCmd', "
+      .. "config = function() vim.api.nvim_create_user_command('DashPaqPostVimCmd', function() end, {}) end },",
     postvim_dir_root
   ),
   string.format(
@@ -136,16 +136,16 @@ local init_lines = {
   ),
   string.format("    { dir = %q, name = 'dw_nested_outer' },", nested_outer_root),
   string.format(
-    "    { dir = %q, name = 'dw_nested_evt', event = { 'User', pattern = 'PCNestedTrigger' } },",
+    "    { dir = %q, name = 'dw_nested_evt', event = { 'User', pattern = 'DashPaqNestedTrigger' } },",
     nested_evt_root
   ),
   "  },",
   "})",
   "vim.api.nvim_create_autocmd('VimEnter', {",
   "  callback = function()",
-  "    vim.cmd('PcPostVimCmd')",
+  "    vim.cmd('DashPaqPostVimCmd')",
   "    vim.schedule(function()",
-  string.format("      vim.fn.writefile({ vim.json.encode(_G.PC) }, %q)", out_path),
+  string.format("      vim.fn.writefile({ vim.json.encode(_G.DASH_PAQ_TEST) }, %q)", out_path),
   "      vim.cmd('qa!')",
   "    end)",
   "  end,",
@@ -233,23 +233,23 @@ t.describe(
 -- Separate child: a cmd-deferred entry triggered from a +cmd command-line command, strictly before VimEnter fires.
 -- The real command (defined by config()) must see after/plugin/** already sourced, same as any other load route.
 local cmdwindow_root = fresh_dir("cmdwindow-dir")
-dirfixture.write(cmdwindow_root, "after/plugin/init.lua", [[_G.PC_AFTER_RAN = true]])
+dirfixture.write(cmdwindow_root, "after/plugin/init.lua", [[_G.DASH_PAQ_AFTER_RAN = true]])
 
 local cmdwindow_out_path = fresh_dir("cmdwindow-out") .. "/result.json"
 local cmdwindow_init_lines = {
   "vim.opt.shadafile = 'NONE'",
   "vim.opt.swapfile = false",
   string.format("vim.opt.rtp:prepend(%q)", ROOT),
-  "_G.PC_AFTER_RAN = false",
+  "_G.DASH_PAQ_AFTER_RAN = false",
   "require('dash_paq').setup({",
   "  dashboard = false,",
   "  version_policy = false,",
   "  spec = {",
   string.format(
-    "    { dir = %q, name = 'dw_cmdwindow', cmd = 'PcCmdWindow', config = function() "
-      .. "vim.api.nvim_create_user_command('PcCmdWindow', function() "
+    "    { dir = %q, name = 'dw_cmdwindow', cmd = 'DashPaqCmdWindow', config = function() "
+      .. "vim.api.nvim_create_user_command('DashPaqCmdWindow', function() "
       .. string.format(
-        "vim.fn.writefile({ vim.json.encode({ saw_after = _G.PC_AFTER_RAN }) }, %q) ",
+        "vim.fn.writefile({ vim.json.encode({ saw_after = _G.DASH_PAQ_AFTER_RAN }) }, %q) ",
         cmdwindow_out_path
       )
       .. "end, {}) end },",
@@ -268,7 +268,7 @@ local function spawn_cmdwindow_child()
   env.XDG_DATA_HOME = fresh_dir("cmdwindow-xdg-data")
   env.XDG_STATE_HOME = fresh_dir("cmdwindow-xdg-state")
   env.XDG_CACHE_HOME = fresh_dir("cmdwindow-xdg-cache")
-  local argv = { vim.v.progpath, "--headless", "-u", cmdwindow_init_path, "+PcCmdWindow", "+qa" }
+  local argv = { vim.v.progpath, "--headless", "-u", cmdwindow_init_path, "+DashPaqCmdWindow", "+qa" }
   local result = vim.system(argv, { text = true, env = env, clear_env = true }):wait(30000)
   assert(result.code == 0, "cmd-window child startup failed: " .. tostring(result.stderr))
   local lines = vim.fn.readfile(cmdwindow_out_path)

@@ -209,10 +209,10 @@ dashboard                                          *dash-paq-config-dashboard*
       margin = 6,               -- gap kept to editor edge
       refresh_on_open = true,   -- refresh online on open
       ascii = false,            -- true = no Nerd Font glyphs
-      fast_scroll = true,
+      fast_scroll = true,       -- full redraws skip highlights past 120 rows
       fetch_concurrency = 8,    -- concurrent git fetch jobs
       apply_batch_size = 4,     -- plugins checked out per blocking update apply
-      skip_risk_confirm = false,  -- skip confirm on risky updates
+      skip_risk_confirm = false,  -- skip confirm on breaking-flagged updates
       skip_clean_confirm = false, -- skip confirm on orphan cleanup
     }
 <
@@ -272,7 +272,7 @@ refs only, no network.
 Print last raw update/same/error counters, check timestamps.
 
 :DashPaq trace [plugin]                                       *:DashPaq-trace*
-Shows every enabled entry's load status, load reason, load count, and
+Shows every enabled entry's load status, load reason, time loaded, and
 trigger set in a buffer; filters to one plugin by name. `q`/`<Esc>`
 closes it.
 
@@ -288,7 +288,15 @@ Copy the live lockfile to `{path}`. `{path}` may contain spaces.
 
 :DashPaq lock import {path}
 Overwrite the live lockfile from `{path}` after validating its JSON
-shape. Restart, or run |:DashPaq-sync|, to apply.
+shape. Restart afterwards: `vim.pack` keeps the lockfile it read at
+startup in memory, so any update or delete applied before the restart
+(for example a confirmed |:DashPaq-sync| or |:DashPaq-status|, or the
+dashboard's `u`/`U`/`<CR>`/`V`/`C`) writes that copy back over the
+import. After the restart, plugins missing on disk install at
+the lockfile's revisions, and
+`vim.pack.update(nil, { target = 'lockfile' })` moves installed ones to
+them. |:DashPaq-sync| instead updates each plugin to its spec's
+`version`.
 
 :DashPaq toggle-dev {plugin}                             *:DashPaq-toggle-dev*
 Flip a dev-capable plugin between its upstream `vim.pack` clone and its dev
@@ -337,13 +345,19 @@ Buffer-local to the dashboard window:
   `c`              clear the search
   `?`              open the key-reference help popup
 
+`<CR>`/`u`/`U` fetch in the background, then check out each fetched
+plugin with `vim.pack.update`, which blocks input while it runs. While
+the cursor keeps changing lines, queued checkouts wait until it has
+stayed on one line for 300 ms. The progress counter counts fetches, so
+rows can still spin after it reaches the total.
+
 Filter/search/sort state persists across sessions (see
 |dash-paq-state|); a saved `selected` filter reopens as `all`.
 Selection is not persisted: it starts empty each time the dashboard opens.
 
 Details popup keys                                     *dash-paq-details-keys*
 `K` opens: one line per pending commit (breaking-change markers), plus
-repo/path/revision metadata.
+status/risk/source/repo/diff/revision metadata.
 
   `q`/`<Esc>`   close the popup
   `o`           open the commit under the cursor

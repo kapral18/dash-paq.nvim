@@ -1,7 +1,6 @@
 -- Facade over the report submodules. Callers require
 -- `dash_paq.dashboard.report` and use the names re-exported here; the
 -- concrete logic lives in the cohesive submodules under `report/`:
---   notify   - user-facing check progress/result notifications
 --   parser   - `nvim-pack://confirm` report buffer -> cache parsing
 --   pipeline - per-plugin async fetch+status refresh
 --   rows     - cache purge and dashboard row assembly

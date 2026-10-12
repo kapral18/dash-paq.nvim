@@ -16,10 +16,10 @@ end
 local srcplug = gitfixture.new_remote("realstartup-src")
 gitfixture.commit(srcplug, "feat: initial plugin", {
   ["plugin/init.lua"] = [[
-_G.PC_COUNTS.src_plugin = (_G.PC_COUNTS.src_plugin or 0) + 1
+_G.DASH_PAQ_COUNTS.src_plugin = (_G.DASH_PAQ_COUNTS.src_plugin or 0) + 1
 ]],
   ["after/plugin/init.lua"] = [[
-_G.PC_COUNTS.src_after = (_G.PC_COUNTS.src_after or 0) + 1
+_G.DASH_PAQ_COUNTS.src_after = (_G.DASH_PAQ_COUNTS.src_after or 0) + 1
 ]],
 })
 gitfixture.push(srcplug)
@@ -29,11 +29,11 @@ local dirplug_root = fresh_dir("dirplug")
 vim.fn.mkdir(vim.fs.joinpath(dirplug_root, "plugin"), "p")
 vim.fn.mkdir(vim.fs.joinpath(dirplug_root, "after", "plugin"), "p")
 vim.fn.writefile(
-  { "_G.PC_COUNTS.dir_plugin = (_G.PC_COUNTS.dir_plugin or 0) + 1" },
+  { "_G.DASH_PAQ_COUNTS.dir_plugin = (_G.DASH_PAQ_COUNTS.dir_plugin or 0) + 1" },
   vim.fs.joinpath(dirplug_root, "plugin", "init.lua")
 )
 vim.fn.writefile(
-  { "_G.PC_COUNTS.dir_after = (_G.PC_COUNTS.dir_after or 0) + 1" },
+  { "_G.DASH_PAQ_COUNTS.dir_after = (_G.DASH_PAQ_COUNTS.dir_after or 0) + 1" },
   vim.fs.joinpath(dirplug_root, "after", "plugin", "init.lua")
 )
 
@@ -44,8 +44,8 @@ local startpkg_root = vim.fs.joinpath("nvim", "site", "pack", "x", "start", "sp"
 local ftdir_root = fresh_dir("ftdirplug")
 vim.fn.mkdir(vim.fs.joinpath(ftdir_root, "ftdetect"), "p")
 vim.fn.writefile(
-  { [[vim.filetype.add({ extension = { pcdet = "pcdet" } })]] },
-  vim.fs.joinpath(ftdir_root, "ftdetect", "pcdet.lua")
+  { [[vim.filetype.add({ extension = { dashpaqdet = "dashpaqdet" } })]] },
+  vim.fs.joinpath(ftdir_root, "ftdetect", "dashpaqdet.lua")
 )
 
 -- Isolated XDG dirs for the child process. A plugin/ file under the isolated config dir stands in for
@@ -56,12 +56,12 @@ local xdg_state = fresh_dir("xdg-state")
 local xdg_cache = fresh_dir("xdg-cache")
 vim.fn.mkdir(vim.fs.joinpath(xdg_config, "nvim", "plugin"), "p")
 vim.fn.writefile(
-  { "_G.PC_COUNTS.user_plugin = (_G.PC_COUNTS.user_plugin or 0) + 1" },
+  { "_G.DASH_PAQ_COUNTS.user_plugin = (_G.DASH_PAQ_COUNTS.user_plugin or 0) + 1" },
   vim.fs.joinpath(xdg_config, "nvim", "plugin", "user_marker.lua")
 )
 vim.fn.mkdir(vim.fs.joinpath(xdg_config, "nvim", "after", "plugin"), "p")
 vim.fn.writefile(
-  { "_G.PC_COUNTS.user_after = (_G.PC_COUNTS.user_after or 0) + 1" },
+  { "_G.DASH_PAQ_COUNTS.user_after = (_G.DASH_PAQ_COUNTS.user_after or 0) + 1" },
   vim.fs.joinpath(xdg_config, "nvim", "after", "plugin", "user_after_marker.lua")
 )
 
@@ -69,11 +69,11 @@ local startpkg_abs = vim.fs.joinpath(xdg_data, startpkg_root)
 vim.fn.mkdir(vim.fs.joinpath(startpkg_abs, "plugin"), "p")
 vim.fn.mkdir(vim.fs.joinpath(startpkg_abs, "after", "plugin"), "p")
 vim.fn.writefile(
-  { "_G.PC_COUNTS.startpkg_plugin = (_G.PC_COUNTS.startpkg_plugin or 0) + 1" },
+  { "_G.DASH_PAQ_COUNTS.startpkg_plugin = (_G.DASH_PAQ_COUNTS.startpkg_plugin or 0) + 1" },
   vim.fs.joinpath(startpkg_abs, "plugin", "init.lua")
 )
 vim.fn.writefile(
-  { "_G.PC_COUNTS.startpkg_after = (_G.PC_COUNTS.startpkg_after or 0) + 1" },
+  { "_G.DASH_PAQ_COUNTS.startpkg_after = (_G.DASH_PAQ_COUNTS.startpkg_after or 0) + 1" },
   vim.fs.joinpath(startpkg_abs, "after", "plugin", "init.lua")
 )
 
@@ -82,19 +82,19 @@ vim.fn.writefile(
 local afterorder_root = fresh_dir("afterorder")
 vim.fn.mkdir(vim.fs.joinpath(afterorder_root, "after", "ftplugin"), "p")
 vim.fn.writefile(
-  { [[table.insert(_G.PC_AFTER_ORDER, "plugin")]] },
-  vim.fs.joinpath(afterorder_root, "after", "ftplugin", "pcafter.lua")
+  { [[table.insert(_G.DASH_PAQ_AFTER_ORDER, "plugin")]] },
+  vim.fs.joinpath(afterorder_root, "after", "ftplugin", "dashpaqafter.lua")
 )
 vim.fn.mkdir(vim.fs.joinpath(xdg_config, "nvim", "after", "ftplugin"), "p")
 vim.fn.writefile(
-  { [[table.insert(_G.PC_AFTER_ORDER, "user")]] },
-  vim.fs.joinpath(xdg_config, "nvim", "after", "ftplugin", "pcafter.lua")
+  { [[table.insert(_G.DASH_PAQ_AFTER_ORDER, "user")]] },
+  vim.fs.joinpath(xdg_config, "nvim", "after", "ftplugin", "dashpaqafter.lua")
 )
 local afterorder_pkg_abs = vim.fs.joinpath(xdg_data, "nvim", "site", "pack", "x", "opt", "afterorderpkg")
 vim.fn.mkdir(vim.fs.joinpath(afterorder_pkg_abs, "after", "ftplugin"), "p")
 vim.fn.writefile(
-  { [[table.insert(_G.PC_AFTER_ORDER, "plugin")]] },
-  vim.fs.joinpath(afterorder_pkg_abs, "after", "ftplugin", "pcafter.lua")
+  { [[table.insert(_G.DASH_PAQ_AFTER_ORDER, "plugin")]] },
+  vim.fs.joinpath(afterorder_pkg_abs, "after", "ftplugin", "dashpaqafter.lua")
 )
 
 local out_path = fresh_dir("out") .. "/result.json"
@@ -103,7 +103,7 @@ local init_lines = {
   "vim.opt.shadafile = 'NONE'",
   "vim.opt.swapfile = false",
   string.format("vim.opt.rtp:prepend(%q)", ROOT),
-  "_G.PC_COUNTS = { src_plugin = 0, src_after = 0, dir_plugin = 0, dir_after = 0, user_plugin = 0 }",
+  "_G.DASH_PAQ_COUNTS = { src_plugin = 0, src_after = 0, dir_plugin = 0, dir_after = 0, user_plugin = 0 }",
   "require('dash_paq').setup({",
   "  dashboard = false,",
   "  version_policy = false,",
@@ -116,7 +116,7 @@ local init_lines = {
   "  callback = function()",
   "    vim.schedule(function()",
   string.format(
-    "      vim.fn.writefile({ vim.json.encode({ counts = _G.PC_COUNTS, loaded_matchparen = vim.g.loaded_matchparen }) }, %q)",
+    "      vim.fn.writefile({ vim.json.encode({ counts = _G.DASH_PAQ_COUNTS, loaded_matchparen = vim.g.loaded_matchparen }) }, %q)",
     out_path
   ),
   "      vim.cmd('qa!')",
@@ -195,7 +195,7 @@ end)
 -- -c commands run, not deferred to VimEnter (matches lazy.nvim and a bare vim.pack.add + setup()).
 local after_order_result = spawn_child(init_path, {
   "-c",
-  "lua _G.PC_COUNTS.after_before_dash_c = (_G.PC_COUNTS.user_after or 0) > 0",
+  "lua _G.DASH_PAQ_COUNTS.after_before_dash_c = (_G.DASH_PAQ_COUNTS.user_after or 0) > 0",
 }, out_path)
 
 t.describe("a `-c` command runs after Neovim's own startup sequence", function()
@@ -239,7 +239,7 @@ t.describe("init.lua sets vim.g.loaded_matchparen = 1 after setup() returns", fu
 end)
 
 -- A dir entry's own ftdetect/ must be on rtp before Neovim's own :runtime! filetype.lua step runs.
-local ftdetect_test_file = fresh_dir("ftdetect-buf") .. "/sample.pcdet"
+local ftdetect_test_file = fresh_dir("ftdetect-buf") .. "/sample.dashpaqdet"
 vim.fn.writefile({ "x" }, ftdetect_test_file)
 local ftdetect_init = fresh_dir("child-init-ftdetect") .. "/init.lua"
 local ftdetect_out = fresh_dir("out-ftdetect") .. "/result.json"
@@ -268,7 +268,7 @@ local ftdetect_result = spawn_child(ftdetect_init, {}, ftdetect_out)
 
 t.describe("a `dir` entry's ftdetect/ defines a custom filetype", function()
   t.it("detects that filetype for a buffer of that extension", function()
-    t.assert.equals("pcdet", ftdetect_result.ft)
+    t.assert.equals("dashpaqdet", ftdetect_result.ft)
   end)
 end)
 
@@ -312,12 +312,12 @@ vim.fn.writefile({
   "vim.opt.shadafile = 'NONE'",
   "vim.opt.swapfile = false",
   string.format("vim.opt.rtp:prepend(%q)", ROOT),
-  "_G.PC_COUNTS = { f9 = 0 }",
+  "_G.DASH_PAQ_COUNTS = { f9 = 0 }",
   "require('dash_paq').setup({",
   "  dashboard = false,",
   "  version_policy = false,",
   string.format(
-    "  spec = { { dir = %q, name = 'rhskeyplug', keys = { { '<F9>', '<cmd>lua _G.PC_COUNTS.f9 = _G.PC_COUNTS.f9 + 1<cr>' } } } },",
+    "  spec = { { dir = %q, name = 'rhskeyplug', keys = { { '<F9>', '<cmd>lua _G.DASH_PAQ_COUNTS.f9 = _G.DASH_PAQ_COUNTS.f9 + 1<cr>' } } } },",
     ftdir_root
   ),
   "})",
@@ -325,7 +325,7 @@ vim.fn.writefile({
   "vim.api.nvim_feedkeys(vim.keycode('<F9>'), 'mtx', false)",
   "vim.api.nvim_feedkeys(vim.keycode('<F9>'), 'mtx', false)",
   "vim.schedule(function()",
-  string.format("  vim.fn.writefile({ vim.json.encode({ f9 = _G.PC_COUNTS.f9 }) }, %q)", rhskey_out),
+  string.format("  vim.fn.writefile({ vim.json.encode({ f9 = _G.DASH_PAQ_COUNTS.f9 }) }, %q)", rhskey_out),
   "  vim.cmd('qa!')",
   "end)",
 }, rhskey_init)
@@ -343,15 +343,15 @@ local ftdeferinit_root = fresh_dir("ftdeferinit")
 vim.fn.mkdir(vim.fs.joinpath(ftdeferinit_root, "ftdetect"), "p")
 vim.fn.mkdir(vim.fs.joinpath(ftdeferinit_root, "plugin"), "p")
 vim.fn.writefile(
-  { [[vim.filetype.add({ extension = { pcdeferinit = "pcdeferinit" } })]] },
+  { [[vim.filetype.add({ extension = { dashpaqdeferinit = "dashpaqdeferinit" } })]] },
   vim.fs.joinpath(ftdeferinit_root, "ftdetect", "custom.lua")
 )
 vim.fn.writefile(
-  { "_G.PC_COUNTS.ftdeferinit_loaded = (_G.PC_COUNTS.ftdeferinit_loaded or 0) + 1" },
+  { "_G.DASH_PAQ_COUNTS.ftdeferinit_loaded = (_G.DASH_PAQ_COUNTS.ftdeferinit_loaded or 0) + 1" },
   vim.fs.joinpath(ftdeferinit_root, "plugin", "init.lua")
 )
 
-local ftdeferinit_file = fresh_dir("ftdeferinit-buf") .. "/sample.pcdeferinit"
+local ftdeferinit_file = fresh_dir("ftdeferinit-buf") .. "/sample.dashpaqdeferinit"
 vim.fn.writefile({ "x" }, ftdeferinit_file)
 local ftdeferinit_init = fresh_dir("child-init-ftdeferinit") .. "/init.lua"
 local ftdeferinit_out = fresh_dir("out-ftdeferinit") .. "/result.json"
@@ -359,11 +359,11 @@ vim.fn.writefile({
   "vim.opt.shadafile = 'NONE'",
   "vim.opt.swapfile = false",
   string.format("vim.opt.rtp:prepend(%q)", ROOT),
-  "_G.PC_COUNTS = {}",
+  "_G.DASH_PAQ_COUNTS = {}",
   "require('dash_paq').setup({",
   "  dashboard = false,",
   "  version_policy = false,",
-  string.format("  spec = { { dir = %q, name = 'ftdeferinitplug', ft = 'pcdeferinit' } },", ftdeferinit_root),
+  string.format("  spec = { { dir = %q, name = 'ftdeferinitplug', ft = 'dashpaqdeferinit' } },", ftdeferinit_root),
   "})",
   "vim.api.nvim_create_autocmd('VimEnter', {",
   "  nested = true,",
@@ -371,7 +371,7 @@ vim.fn.writefile({
   string.format("    vim.cmd('edit %s')", ftdeferinit_file),
   "    vim.schedule(function()",
   string.format(
-    "      vim.fn.writefile({ vim.json.encode({ ft = vim.bo.filetype, loaded = _G.PC_COUNTS.ftdeferinit_loaded }) }, %q)",
+    "      vim.fn.writefile({ vim.json.encode({ ft = vim.bo.filetype, loaded = _G.DASH_PAQ_COUNTS.ftdeferinit_loaded }) }, %q)",
     ftdeferinit_out
   ),
   "      vim.cmd('qa!')",
@@ -383,7 +383,7 @@ local ftdeferinit_result = spawn_child(ftdeferinit_init, {}, ftdeferinit_out)
 
 t.describe("an ft-deferred `dir` entry's own ftdetect/ defines its filetype from init.lua", function()
   t.it("detects the entry's own custom filetype", function()
-    t.assert.equals("pcdeferinit", ftdeferinit_result.ft)
+    t.assert.equals("dashpaqdeferinit", ftdeferinit_result.ft)
   end)
   t.it("loads the entry once its own filetype triggers", function()
     t.assert.equals(1, ftdeferinit_result.loaded)
@@ -395,19 +395,22 @@ end)
 local depB_root = fresh_dir("depB")
 vim.fn.mkdir(vim.fs.joinpath(depB_root, "plugin"), "p")
 vim.fn.mkdir(vim.fs.joinpath(depB_root, "ftplugin"), "p")
-vim.fn.writefile({ "vim.cmd('command Bcmd let g:pc_bcmd_ran = 1')" }, vim.fs.joinpath(depB_root, "plugin", "init.lua"))
 vim.fn.writefile(
-  { "_G.PC_COUNTS.b_ftplugin = (_G.PC_COUNTS.b_ftplugin or 0) + 1" },
-  vim.fs.joinpath(depB_root, "ftplugin", "pcb.lua")
+  { "vim.cmd('command Bcmd let g:dash_paq_bcmd_ran = 1')" },
+  vim.fs.joinpath(depB_root, "plugin", "init.lua")
+)
+vim.fn.writefile(
+  { "_G.DASH_PAQ_COUNTS.b_ftplugin = (_G.DASH_PAQ_COUNTS.b_ftplugin or 0) + 1" },
+  vim.fs.joinpath(depB_root, "ftplugin", "dashpaqb.lua")
 )
 local depA_root = fresh_dir("depA")
 vim.fn.mkdir(vim.fs.joinpath(depA_root, "plugin"), "p")
 vim.fn.writefile(
-  { "_G.PC_COUNTS.a_plugin = (_G.PC_COUNTS.a_plugin or 0) + 1" },
+  { "_G.DASH_PAQ_COUNTS.a_plugin = (_G.DASH_PAQ_COUNTS.a_plugin or 0) + 1" },
   vim.fs.joinpath(depA_root, "plugin", "init.lua")
 )
 
-local depb_file = fresh_dir("depb-buf") .. "/sample.pcb"
+local depb_file = fresh_dir("depb-buf") .. "/sample.dashpaqb"
 vim.fn.writefile({ "x" }, depb_file)
 local dep_init = fresh_dir("child-init-dep") .. "/init.lua"
 local dep_out = fresh_dir("out-dep") .. "/result.json"
@@ -415,14 +418,14 @@ vim.fn.writefile({
   "vim.opt.shadafile = 'NONE'",
   "vim.opt.swapfile = false",
   string.format("vim.opt.rtp:prepend(%q)", ROOT),
-  "vim.filetype.add({ extension = { pcb = 'pcb' } })",
-  "_G.PC_COUNTS = {}",
+  "vim.filetype.add({ extension = { dashpaqb = 'dashpaqb' } })",
+  "_G.DASH_PAQ_COUNTS = {}",
   "require('dash_paq').setup({",
   "  dashboard = false,",
   "  version_policy = false,",
   "  spec = {",
   string.format(
-    "    { dir = %q, name = 'depA', dependencies = { { dir = %q, name = 'depB', cmd = 'Bcmd', ft = 'pcb' } } },",
+    "    { dir = %q, name = 'depA', dependencies = { { dir = %q, name = 'depB', cmd = 'Bcmd', ft = 'dashpaqb' } } },",
     depA_root,
     depB_root
   ),
@@ -435,7 +438,7 @@ vim.fn.writefile({
   string.format("    vim.cmd('edit %s')", depb_file),
   "    vim.schedule(function()",
   string.format(
-    "      vim.fn.writefile({ vim.json.encode({ ok = ok, err = tostring(err), bcmd_ran = vim.g.pc_bcmd_ran, b_ftplugin = _G.PC_COUNTS.b_ftplugin }) }, %q)",
+    "      vim.fn.writefile({ vim.json.encode({ ok = ok, err = tostring(err), bcmd_ran = vim.g.dash_paq_bcmd_ran, b_ftplugin = _G.DASH_PAQ_COUNTS.b_ftplugin }) }, %q)",
     dep_out
   ),
   "      vim.cmd('qa!')",
@@ -461,7 +464,7 @@ end)
 -- entry's build hook must load it through load_entry (state becomes configured).
 local buildstart_remote = gitfixture.new_remote("buildstart")
 gitfixture.commit(buildstart_remote, "feat: initial", {
-  ["plugin/init.lua"] = "_G.PC_COUNTS.bp_plugin = (_G.PC_COUNTS.bp_plugin or 0) + 1",
+  ["plugin/init.lua"] = "_G.DASH_PAQ_COUNTS.bp_plugin = (_G.DASH_PAQ_COUNTS.bp_plugin or 0) + 1",
 })
 gitfixture.push(buildstart_remote)
 
@@ -471,13 +474,13 @@ vim.fn.writefile({
   "vim.opt.shadafile = 'NONE'",
   "vim.opt.swapfile = false",
   string.format("vim.opt.rtp:prepend(%q)", ROOT),
-  "_G.PC_COUNTS = { bp_build_ran = 0 }",
+  "_G.DASH_PAQ_COUNTS = { bp_build_ran = 0 }",
   "require('dash_paq').setup({",
   "  dashboard = false,",
   "  version_policy = false,",
   "  spec = {",
   string.format(
-    "    { src = %q, name = 'buildstart', build = function() _G.PC_COUNTS.bp_build_ran = _G.PC_COUNTS.bp_build_ran + 1 end },",
+    "    { src = %q, name = 'buildstart', build = function() _G.DASH_PAQ_COUNTS.bp_build_ran = _G.DASH_PAQ_COUNTS.bp_build_ran + 1 end },",
     buildstart_remote.src
   ),
   "  },",
@@ -485,7 +488,7 @@ vim.fn.writefile({
   "vim.api.nvim_create_autocmd('VimEnter', {",
   "  callback = function()",
   "    vim.schedule(function()",
-  string.format("      vim.fn.writefile({ vim.json.encode(_G.PC_COUNTS) }, %q)", build_out),
+  string.format("      vim.fn.writefile({ vim.json.encode(_G.DASH_PAQ_COUNTS) }, %q)", build_out),
   "      vim.cmd('qa!')",
   "    end)",
   "  end,",
@@ -506,20 +509,26 @@ end)
 -- higher-priority entry before a lower-priority one.
 local orderA_root = fresh_dir("orderA")
 vim.fn.mkdir(vim.fs.joinpath(orderA_root, "plugin"), "p")
-vim.fn.writefile({ [[table.insert(_G.PC_ORDER, "orderA-plugin")]] }, vim.fs.joinpath(orderA_root, "plugin", "init.lua"))
+vim.fn.writefile(
+  { [[table.insert(_G.DASH_PAQ_ORDER, "orderA-plugin")]] },
+  vim.fs.joinpath(orderA_root, "plugin", "init.lua")
+)
 local orderB_root = fresh_dir("orderB")
 vim.fn.mkdir(vim.fs.joinpath(orderB_root, "plugin"), "p")
-vim.fn.writefile({ [[table.insert(_G.PC_ORDER, "orderB-plugin")]] }, vim.fs.joinpath(orderB_root, "plugin", "init.lua"))
+vim.fn.writefile(
+  { [[table.insert(_G.DASH_PAQ_ORDER, "orderB-plugin")]] },
+  vim.fs.joinpath(orderB_root, "plugin", "init.lua")
+)
 local prioLow_root = fresh_dir("prioLow")
 vim.fn.mkdir(vim.fs.joinpath(prioLow_root, "plugin"), "p")
 vim.fn.writefile(
-  { [[table.insert(_G.PC_ORDER, "prioLow-plugin")]] },
+  { [[table.insert(_G.DASH_PAQ_ORDER, "prioLow-plugin")]] },
   vim.fs.joinpath(prioLow_root, "plugin", "init.lua")
 )
 local prioHigh_root = fresh_dir("prioHigh")
 vim.fn.mkdir(vim.fs.joinpath(prioHigh_root, "plugin"), "p")
 vim.fn.writefile(
-  { [[table.insert(_G.PC_ORDER, "prioHigh-plugin")]] },
+  { [[table.insert(_G.DASH_PAQ_ORDER, "prioHigh-plugin")]] },
   vim.fs.joinpath(prioHigh_root, "plugin", "init.lua")
 )
 
@@ -536,7 +545,7 @@ vim.fn.writefile({
   "vim.opt.shadafile = 'NONE'",
   "vim.opt.swapfile = false",
   string.format("vim.opt.rtp:prepend(%q)", ROOT),
-  "_G.PC_ORDER = {}",
+  "_G.DASH_PAQ_ORDER = {}",
   "require('dash_paq').setup({",
   "  dashboard = false,",
   "  version_policy = false,",
@@ -554,7 +563,7 @@ vim.fn.writefile({
   "  callback = function()",
   "    vim.schedule(function()",
   string.format(
-    "      vim.fn.writefile({ vim.json.encode({ order = _G.PC_ORDER, rtp = vim.opt.rtp:get() }) }, %q)",
+    "      vim.fn.writefile({ vim.json.encode({ order = _G.DASH_PAQ_ORDER, rtp = vim.opt.rtp:get() }) }, %q)",
     order_out
   ),
   "      vim.cmd('qa!')",
@@ -617,51 +626,54 @@ t.describe("rtp insertion at startup covers a dependency and a priority differen
 end)
 
 -- This loader's own `dir` entry vs a real `:packadd!` control.
-local afterorder_pc_init = fresh_dir("child-init-afterorder-pc") .. "/init.lua"
-local afterorder_pc_out = fresh_dir("out-afterorder-pc") .. "/result.json"
+local afterorder_self_init = fresh_dir("child-init-afterorder-self") .. "/init.lua"
+local afterorder_self_out = fresh_dir("out-afterorder-self") .. "/result.json"
 vim.fn.writefile({
   "vim.opt.shadafile = 'NONE'",
   "vim.opt.swapfile = false",
   string.format("vim.opt.rtp:prepend(%q)", ROOT),
-  "_G.PC_COUNTS = {}",
-  "_G.PC_AFTER_ORDER = {}",
+  "_G.DASH_PAQ_COUNTS = {}",
+  "_G.DASH_PAQ_AFTER_ORDER = {}",
   "require('dash_paq').setup({",
   "  dashboard = false,",
   "  version_policy = false,",
-  string.format("  spec = { { dir = %q, name = 'afterorderpc' } },", afterorder_root),
+  string.format("  spec = { { dir = %q, name = 'afterorderself' } },", afterorder_root),
   "})",
   "vim.api.nvim_create_autocmd('VimEnter', {",
   "  nested = true,",
   "  callback = function()",
   "    local buf = vim.api.nvim_create_buf(false, true)",
   "    vim.api.nvim_set_current_buf(buf)",
-  "    vim.bo[buf].filetype = 'pcafter'",
+  "    vim.bo[buf].filetype = 'dashpaqafter'",
   "    vim.schedule(function()",
-  string.format("      vim.fn.writefile({ vim.json.encode({ order = _G.PC_AFTER_ORDER }) }, %q)", afterorder_pc_out),
+  string.format(
+    "      vim.fn.writefile({ vim.json.encode({ order = _G.DASH_PAQ_AFTER_ORDER }) }, %q)",
+    afterorder_self_out
+  ),
   "      vim.cmd('qa!')",
   "    end)",
   "  end,",
   "})",
-}, afterorder_pc_init)
-local afterorder_pc_result = spawn_child(afterorder_pc_init, {}, afterorder_pc_out)
+}, afterorder_self_init)
+local afterorder_self_result = spawn_child(afterorder_self_init, {}, afterorder_self_out)
 
 local afterorder_native_init = fresh_dir("child-init-afterorder-native") .. "/init.lua"
 local afterorder_native_out = fresh_dir("out-afterorder-native") .. "/result.json"
 vim.fn.writefile({
   "vim.opt.shadafile = 'NONE'",
   "vim.opt.swapfile = false",
-  "_G.PC_COUNTS = {}",
-  "_G.PC_AFTER_ORDER = {}",
+  "_G.DASH_PAQ_COUNTS = {}",
+  "_G.DASH_PAQ_AFTER_ORDER = {}",
   "vim.cmd('packadd! afterorderpkg')",
   "vim.api.nvim_create_autocmd('VimEnter', {",
   "  nested = true,",
   "  callback = function()",
   "    local buf = vim.api.nvim_create_buf(false, true)",
   "    vim.api.nvim_set_current_buf(buf)",
-  "    vim.bo[buf].filetype = 'pcafter'",
+  "    vim.bo[buf].filetype = 'dashpaqafter'",
   "    vim.schedule(function()",
   string.format(
-    "      vim.fn.writefile({ vim.json.encode({ order = _G.PC_AFTER_ORDER }) }, %q)",
+    "      vim.fn.writefile({ vim.json.encode({ order = _G.DASH_PAQ_AFTER_ORDER }) }, %q)",
     afterorder_native_out
   ),
   "      vim.cmd('qa!')",
@@ -673,8 +685,8 @@ local afterorder_native_result = spawn_child(afterorder_native_init, {}, afteror
 
 t.describe("a plugin ships after/ftplugin/<ft> and the user overrides the same filetype", function()
   t.it("sources the plugin's after/ftplugin/<ft> before the user's own (user wins)", function()
-    t.assert.equals("plugin", (afterorder_pc_result.order or {})[1])
-    t.assert.equals("user", (afterorder_pc_result.order or {})[2])
+    t.assert.equals("plugin", (afterorder_self_result.order or {})[1])
+    t.assert.equals("user", (afterorder_self_result.order or {})[2])
   end)
   t.it("matches a real :packadd! control's own order (same as plain vim.pack.add)", function()
     t.assert.equals("plugin", (afterorder_native_result.order or {})[1])
@@ -687,7 +699,7 @@ end)
 local evtstart_dir = fresh_dir("evtstart")
 vim.fn.mkdir(vim.fs.joinpath(evtstart_dir, "plugin"), "p")
 vim.fn.writefile(
-  { [[vim.api.nvim_exec_autocmds('User', { pattern = 'PcFromPlugin' })]] },
+  { [[vim.api.nvim_exec_autocmds('User', { pattern = 'DashPaqFromPlugin' })]] },
   vim.fs.joinpath(evtstart_dir, "plugin", "init.lua")
 )
 
@@ -695,18 +707,18 @@ local evtdeferred_dir_dir = fresh_dir("evtdeferreddir")
 vim.fn.mkdir(vim.fs.joinpath(evtdeferred_dir_dir, "plugin"), "p")
 vim.fn.mkdir(vim.fs.joinpath(evtdeferred_dir_dir, "after", "plugin"), "p")
 vim.fn.writefile(
-  { "_G.PC_COUNTS.evtdeferred_dir_plugin = (_G.PC_COUNTS.evtdeferred_dir_plugin or 0) + 1" },
+  { "_G.DASH_PAQ_COUNTS.evtdeferred_dir_plugin = (_G.DASH_PAQ_COUNTS.evtdeferred_dir_plugin or 0) + 1" },
   vim.fs.joinpath(evtdeferred_dir_dir, "plugin", "init.lua")
 )
 vim.fn.writefile(
-  { "_G.PC_COUNTS.evtdeferred_dir_after = (_G.PC_COUNTS.evtdeferred_dir_after or 0) + 1" },
+  { "_G.DASH_PAQ_COUNTS.evtdeferred_dir_after = (_G.DASH_PAQ_COUNTS.evtdeferred_dir_after or 0) + 1" },
   vim.fs.joinpath(evtdeferred_dir_dir, "after", "plugin", "init.lua")
 )
 
 local evtdeferredsrc_remote = gitfixture.new_remote("evtdeferredsrc")
 gitfixture.commit(evtdeferredsrc_remote, "feat: initial", {
-  ["plugin/init.lua"] = [[_G.PC_COUNTS.evtdeferred_src_plugin = (_G.PC_COUNTS.evtdeferred_src_plugin or 0) + 1]],
-  ["after/plugin/init.lua"] = [[_G.PC_COUNTS.evtdeferred_src_after = (_G.PC_COUNTS.evtdeferred_src_after or 0) + 1]],
+  ["plugin/init.lua"] = [[_G.DASH_PAQ_COUNTS.evtdeferred_src_plugin = (_G.DASH_PAQ_COUNTS.evtdeferred_src_plugin or 0) + 1]],
+  ["after/plugin/init.lua"] = [[_G.DASH_PAQ_COUNTS.evtdeferred_src_after = (_G.DASH_PAQ_COUNTS.evtdeferred_src_after or 0) + 1]],
 })
 gitfixture.push(evtdeferredsrc_remote)
 
@@ -716,18 +728,18 @@ vim.fn.writefile({
   "vim.opt.shadafile = 'NONE'",
   "vim.opt.swapfile = false",
   string.format("vim.opt.rtp:prepend(%q)", ROOT),
-  "_G.PC_COUNTS = {}",
+  "_G.DASH_PAQ_COUNTS = {}",
   "require('dash_paq').setup({",
   "  dashboard = false,",
   "  version_policy = false,",
   "  spec = {",
   string.format("    { dir = %q, name = 'evtstart' },", evtstart_dir),
   string.format(
-    "    { dir = %q, name = 'evtdeferred_dir', event = { 'User', pattern = 'PcFromPlugin' } },",
+    "    { dir = %q, name = 'evtdeferred_dir', event = { 'User', pattern = 'DashPaqFromPlugin' } },",
     evtdeferred_dir_dir
   ),
   string.format(
-    "    { src = %q, name = 'evtdeferred_src', event = { 'User', pattern = 'PcFromPlugin' } },",
+    "    { src = %q, name = 'evtdeferred_src', event = { 'User', pattern = 'DashPaqFromPlugin' } },",
     evtdeferredsrc_remote.src
   ),
   "  },",
@@ -735,7 +747,7 @@ vim.fn.writefile({
   "vim.api.nvim_create_autocmd('VimEnter', {",
   "  callback = function()",
   "    vim.schedule(function()",
-  string.format("      vim.fn.writefile({ vim.json.encode(_G.PC_COUNTS) }, %q)", evtorder_out),
+  string.format("      vim.fn.writefile({ vim.json.encode(_G.DASH_PAQ_COUNTS) }, %q)", evtorder_out),
   "      vim.cmd('qa!')",
   "    end)",
   "  end,",

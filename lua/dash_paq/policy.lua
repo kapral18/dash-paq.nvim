@@ -3,7 +3,12 @@
 local M = {}
 
 local semver = require("dash_paq.semver")
+local git = require("dash_paq.git")
+local fs = require("dash_paq.fs")
 local parse_release_tag = semver.parse_release_tag
+
+-- `version_policy.json` layout version; a cache with any other value is rebuilt.
+local SCHEMA = 3
 
 M.DEFAULTS = {
   min_tags = 3,
@@ -23,34 +28,16 @@ function M.configure(opts)
 end
 
 function M.version_policy_path()
-  return vim.fs.joinpath(vim.fn.stdpath("state"), "dash-paq", "version_policy.json")
-end
-
-local function version_policy_path()
-  return M.version_policy_path()
-end
-
-local function ensure_state_dir()
-  local dir = vim.fs.dirname(version_policy_path())
-  if vim.fn.isdirectory(dir) ~= 1 then
-    pcall(vim.fn.mkdir, dir, "p")
-  end
+  return fs.state_path("version_policy.json")
 end
 
 local function read_tag_dates(path)
   if type(path) ~= "string" or path == "" then
     return {}
   end
-  local result = vim
-    .system({
-      "git",
-      "-C",
-      path,
-      "for-each-ref",
-      "--sort=-creatordate",
-      "--format=%(refname:short)\t%(creatordate:unix)",
-      "refs/tags",
-    }, { text = true })
+  local format = "--format=%(refname:short)\t%(creatordate:unix)"
+  local result = git
+    .run({ "-C", path, "for-each-ref", "--sort=-creatordate", format, "refs/tags" }, { text = true })
     :wait()
   if result.code ~= 0 or type(result.stdout) ~= "string" or result.stdout == "" then
     return {}
@@ -70,7 +57,7 @@ local function tags_reachable_from(path, ref)
   if type(path) ~= "string" or path == "" or type(ref) ~= "string" or ref == "" then
     return nil
   end
-  local result = vim.system({ "git", "-C", path, "tag", "--merged", ref }, { text = true }):wait()
+  local result = git.run({ "-C", path, "tag", "--merged", ref }, { text = true }):wait()
   if result.code ~= 0 or type(result.stdout) ~= "string" then
     return nil
   end
@@ -115,9 +102,7 @@ local function commit_count_between(path, from_ref, to_ref)
   if type(path) ~= "string" or path == "" then
     return nil
   end
-  local result = vim
-    .system({ "git", "-C", path, "rev-list", "--count", from_ref .. ".." .. to_ref }, { text = true })
-    :wait()
+  local result = git.run({ "-C", path, "rev-list", "--count", from_ref .. ".." .. to_ref }, { text = true }):wait()
   if result.code ~= 0 or type(result.stdout) ~= "string" then
     return nil
   end
@@ -128,8 +113,8 @@ local function origin_head_ref(path)
   if type(path) ~= "string" or path == "" then
     return nil
   end
-  local result = vim
-    .system({ "git", "-C", path, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD" }, { text = true })
+  local result = git
+    .run({ "-C", path, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD" }, { text = true })
     :wait()
   if result.code ~= 0 or type(result.stdout) ~= "string" then
     return nil
@@ -180,9 +165,7 @@ local function current_head_tag(path)
   if type(path) ~= "string" or path == "" then
     return nil
   end
-  local result = vim
-    .system({ "git", "-C", path, "describe", "--tags", "--exact-match", "HEAD" }, { text = true })
-    :wait()
+  local result = git.run({ "-C", path, "describe", "--tags", "--exact-match", "HEAD" }, { text = true }):wait()
   if result.code ~= 0 or type(result.stdout) ~= "string" then
     return nil
   end
@@ -193,7 +176,7 @@ local function current_head_tag(path)
   return nil
 end
 
-local function decide_tag_strategy(path, _name)
+local function decide_tag_strategy(path)
   local tag_dates = read_tag_dates(path)
   if #tag_dates == 0 then
     return { strategy = "branch", semver_tags = false, reason = "no semver tags" }
@@ -290,54 +273,23 @@ local function decide_tag_strategy(path, _name)
 end
 
 function M.load_version_policy()
-  local path = version_policy_path()
-  if vim.fn.filereadable(path) ~= 1 then
+  local decoded = fs.read_json(M.version_policy_path())
+  if not decoded then
     return nil
   end
-
-  local ok_read, lines = pcall(vim.fn.readfile, path)
-  if not ok_read or type(lines) ~= "table" or #lines == 0 then
-    return nil
-  end
-
-  local ok_decode, decoded = pcall(vim.json.decode, table.concat(lines, "\n"))
-  if not ok_decode or type(decoded) ~= "table" then
-    return nil
-  end
-
   if type(decoded.plugins) ~= "table" then
     decoded.plugins = {}
   end
-
   decoded.schema = tonumber(decoded.schema) or 0
   decoded.generated_at = tonumber(decoded.generated_at)
   return decoded
-end
-
-local function load_version_policy()
-  return M.load_version_policy()
 end
 
 function M.write_version_policy(plugins)
   if type(plugins) ~= "table" then
     return false
   end
-  local payload = {
-    schema = 3,
-    generated_at = os.time(),
-    plugins = plugins,
-  }
-  local ok_json, encoded = pcall(vim.json.encode, payload)
-  if not ok_json or type(encoded) ~= "string" or encoded == "" then
-    return false
-  end
-  ensure_state_dir()
-  local ok_write = pcall(vim.fn.writefile, { encoded }, version_policy_path())
-  return ok_write and true or false
-end
-
-local function write_version_policy(plugins)
-  return M.write_version_policy(plugins)
+  return fs.write_json(M.version_policy_path(), { schema = SCHEMA, generated_at = os.time(), plugins = plugins })
 end
 
 -- Returns "fresh" (cache still valid), "full" (expired or schema mismatch,
@@ -346,7 +298,7 @@ local function policy_refresh_mode(existing, plugin_names)
   if type(plugin_names) ~= "table" then
     return "full"
   end
-  if type(existing) ~= "table" or existing.schema ~= 3 or type(existing.plugins) ~= "table" then
+  if type(existing) ~= "table" or existing.schema ~= SCHEMA or type(existing.plugins) ~= "table" then
     return "full"
   end
 
@@ -375,60 +327,72 @@ local policy_refresh_in_progress = false
 -- so `vim.defer_fn` with ms >= 1 is used instead to actually yield.
 local ASYNC_STEP_YIELD_MS = 1
 
--- Synchronous refresh for user-initiated paths (`:DashPaq sync`, `status`, `policy-rebuild`)
--- where the user is already waiting.
-function M.refresh_version_policy_if_needed()
+-- What a refresh must do for the installed plugin set. Returns nil when
+-- `vim.pack.get` fails, else `{ mode, plugins, pending }`: `mode` is "fresh"
+-- (cache still valid), "full" (expired or schema mismatch), or "incremental"
+-- (valid but missing some plugins); `plugins` is the cached entries to keep
+-- (removed plugins dropped); `pending` is the `{ name, path }` list to
+-- recompute.
+local function plan_refresh()
   local ok, plug_data = pcall(vim.pack.get, nil, { info = false })
   if not ok or type(plug_data) ~= "table" then
-    return false
+    return nil
   end
 
-  local names = {}
+  local installed = {}
   for _, p in ipairs(plug_data) do
-    if p and p.spec and type(p.spec.name) == "string" and p.spec.name ~= "" then
-      names[#names + 1] = p.spec.name
+    local name = p and p.spec and p.spec.name
+    if type(name) == "string" and name ~= "" then
+      installed[#installed + 1] = { name = name, path = p.path }
     end
   end
+  local names = vim.tbl_map(function(item)
+    return item.name
+  end, installed)
 
-  local existing = load_version_policy()
+  local existing = M.load_version_policy()
   local mode = policy_refresh_mode(existing, names)
+  local existing_plugins = existing and existing.plugins or {}
   if mode == "fresh" then
-    return true
+    return { mode = mode, plugins = existing_plugins, pending = {} }
   end
 
   local plugins = {}
-  if mode == "incremental" and type(existing) == "table" and type(existing.plugins) == "table" then
-    for name, info in pairs(existing.plugins) do
-      plugins[name] = info
-    end
-  end
-
-  local name_set = {}
-  for _, name in ipairs(names) do
-    name_set[name] = true
-  end
-
   if mode == "incremental" then
-    -- Drop entries for plugins that were removed so the on-disk cache stays
-    -- in sync with the current plugin set.
-    for name in pairs(plugins) do
-      if not name_set[name] then
-        plugins[name] = nil
+    local name_set = {}
+    for _, name in ipairs(names) do
+      name_set[name] = true
+    end
+    for name, info in pairs(existing_plugins) do
+      if name_set[name] then
+        plugins[name] = info
       end
     end
   end
 
-  for _, p in ipairs(plug_data) do
-    local name = p and p.spec and p.spec.name
-    local path = p and p.path
-    if type(name) == "string" and name ~= "" and type(path) == "string" and path ~= "" then
-      if mode == "full" or plugins[name] == nil then
-        plugins[name] = decide_tag_strategy(path, name)
-      end
+  local pending = {}
+  for _, item in ipairs(installed) do
+    if type(item.path) == "string" and item.path ~= "" and plugins[item.name] == nil then
+      pending[#pending + 1] = item
     end
   end
+  return { mode = mode, plugins = plugins, pending = pending }
+end
 
-  return write_version_policy(plugins)
+-- Synchronous refresh for user-initiated paths (`:DashPaq sync`, `status`, `policy-rebuild`)
+-- where the user is already waiting.
+function M.refresh_version_policy_if_needed()
+  local plan = plan_refresh()
+  if not plan then
+    return false
+  end
+  if plan.mode == "fresh" then
+    return true
+  end
+  for _, item in ipairs(plan.pending) do
+    plan.plugins[item.name] = decide_tag_strategy(item.path)
+  end
+  return M.write_version_policy(plan.plugins)
 end
 
 -- Async variant used by the startup bootstrap and after a dashboard apply.
@@ -436,85 +400,37 @@ end
 -- shell-outs, since the synchronous path can block for several seconds on a
 -- cold run.
 function M.refresh_version_policy_async(callback)
+  local function reply(ok, reason)
+    if callback then
+      vim.schedule(function()
+        callback(ok, reason)
+      end)
+    end
+  end
+
   if policy_refresh_in_progress then
-    if callback then
-      vim.schedule(function()
-        callback(false, "busy")
-      end)
-    end
+    reply(false, "busy")
     return false
   end
 
-  local ok, plug_data = pcall(vim.pack.get, nil, { info = false })
-  if not ok or type(plug_data) ~= "table" then
-    if callback then
-      vim.schedule(function()
-        callback(false, "no-plugins")
-      end)
-    end
+  local plan = plan_refresh()
+  if not plan then
+    reply(false, "no-plugins")
     return false
   end
-
-  local names = {}
-  for _, p in ipairs(plug_data) do
-    if p and p.spec and type(p.spec.name) == "string" and p.spec.name ~= "" then
-      names[#names + 1] = p.spec.name
-    end
-  end
-
-  local existing = load_version_policy()
-  local mode = policy_refresh_mode(existing, names)
-  if mode == "fresh" then
-    if callback then
-      vim.schedule(function()
-        callback(true, "fresh")
-      end)
-    end
+  if plan.mode == "fresh" then
+    reply(true, "fresh")
     return true
   end
 
-  local plugins = {}
-  if mode == "incremental" and type(existing) == "table" and type(existing.plugins) == "table" then
-    for name, info in pairs(existing.plugins) do
-      plugins[name] = info
-    end
-  end
-
-  local name_set = {}
-  for _, name in ipairs(names) do
-    name_set[name] = true
-  end
-  if mode == "incremental" then
-    for name in pairs(plugins) do
-      if not name_set[name] then
-        plugins[name] = nil
-      end
-    end
-  end
-
-  local pending = {}
-  for _, p in ipairs(plug_data) do
-    local name = p and p.spec and p.spec.name
-    local path = p and p.path
-    if type(name) == "string" and name ~= "" and type(path) == "string" and path ~= "" then
-      if mode == "full" or plugins[name] == nil then
-        pending[#pending + 1] = { name = name, path = path }
-      end
-    end
-  end
-
+  local plugins, pending = plan.plugins, plan.pending
   if #pending == 0 then
-    local wrote = write_version_policy(plugins)
-    if callback then
-      vim.schedule(function()
-        callback(wrote, "no-work")
-      end)
-    end
+    local wrote = M.write_version_policy(plugins)
+    reply(wrote, "no-work")
     return wrote
   end
 
   policy_refresh_in_progress = true
-  local total = #pending
   local index = 0
 
   local function step()
@@ -522,19 +438,19 @@ function M.refresh_version_policy_async(callback)
       return
     end
     index = index + 1
-    if index > total then
+    if index > #pending then
       policy_refresh_in_progress = false
-      local wrote = write_version_policy(plugins)
+      local wrote = M.write_version_policy(plugins)
       if callback then
-        callback(wrote, mode)
+        callback(wrote, plan.mode)
       end
       return
     end
 
-    local entry = pending[index]
-    local ok_entry, policy = pcall(decide_tag_strategy, entry.path, entry.name)
-    if ok_entry and type(policy) == "table" then
-      plugins[entry.name] = policy
+    local item = pending[index]
+    local ok_item, decision = pcall(decide_tag_strategy, item.path)
+    if ok_item and type(decision) == "table" then
+      plugins[item.name] = decision
     end
     vim.defer_fn(step, ASYNC_STEP_YIELD_MS)
   end
@@ -546,7 +462,7 @@ end
 -- Drop a single plugin entry (or everything when `name == nil`) from the
 -- on-disk version policy so the next refresh recomputes it from scratch.
 function M.invalidate_version_policy(name)
-  local existing = load_version_policy()
+  local existing = M.load_version_policy()
   if type(existing) ~= "table" or type(existing.plugins) ~= "table" then
     return true
   end
@@ -555,9 +471,9 @@ function M.invalidate_version_policy(name)
       return true
     end
     existing.plugins[name] = nil
-    return write_version_policy(existing.plugins)
+    return M.write_version_policy(existing.plugins)
   end
-  local path = version_policy_path()
+  local path = M.version_policy_path()
   if vim.fn.filereadable(path) == 1 then
     pcall(vim.fn.delete, path)
   end

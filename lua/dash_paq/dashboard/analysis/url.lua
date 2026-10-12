@@ -1,11 +1,8 @@
--- Source/repo/compare/commit URL derivation. `configure(hosts)` sets the
--- git-forge host table; falls back to built-in github.com/codeberg.org templates.
+-- Source/repo/compare/commit URL derivation. `configure(hosts)` merges extra
+-- git-forge hosts over the built-in ones (`dash_paq.config` defaults).
 local M = {}
 
-local DEFAULT_HOSTS = {
-  ["github.com"] = { compare = "compare/%s...%s", commit = "commit/%s" },
-  ["codeberg.org"] = { compare = "compare/%s...%s", commit = "commit/%s" },
-}
+local DEFAULT_HOSTS = require("dash_paq.config").defaults.hosts
 
 local configured_hosts = DEFAULT_HOSTS
 

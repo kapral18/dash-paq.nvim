@@ -1,3 +1,4 @@
+local state = require("dash_paq.dashboard.state")
 local fmt = require("dash_paq.dashboard.ui.format")
 local rows = require("dash_paq.dashboard.ui.rows")
 local view = require("dash_paq.dashboard.ui.view")
@@ -56,6 +57,20 @@ local function visual_toggle_selection(ctx)
 end
 
 function M.attach(ctx)
+  -- `refresh.run_row_op` holds queued update applies until the cursor settles.
+  -- Only a line change counts: the spinner rewriting the cursor's row also
+  -- fires CursorMoved.
+  local last_line
+  vim.api.nvim_create_autocmd("CursorMoved", {
+    buffer = ctx.bufnr,
+    callback = function()
+      local line = vim.api.nvim_win_get_cursor(0)[1]
+      if line ~= last_line then
+        last_line = line
+        state.last_cursor_move = vim.uv.hrtime()
+      end
+    end,
+  })
   vim.keymap.set("n", "q", function()
     close_dashboard(ctx)
   end, { buffer = ctx.bufnr, nowait = true, silent = true })
@@ -69,10 +84,10 @@ function M.attach(ctx)
     pcall(vim.api.nvim_win_set_cursor, 0, { ctx.first_data_line, 0 })
   end, { buffer = ctx.bufnr, nowait = true, silent = true })
   vim.keymap.set("n", "R", function()
-    refresh.refresh(ctx, true, nil, { mark_online = true, mark_offline = false })
+    refresh.refresh(ctx, true)
   end, { buffer = ctx.bufnr, nowait = true, silent = true })
   vim.keymap.set("n", "r", function()
-    refresh.refresh(ctx, false, nil, { mark_online = false, mark_offline = true })
+    refresh.refresh(ctx, false)
   end, { buffer = ctx.bufnr, nowait = true, silent = true })
   vim.keymap.set("n", "<Space>", function()
     toggle_current(ctx)
@@ -160,7 +175,7 @@ function M.attach(ctx)
     popups.open_details(ctx, rows.row_at_cursor(ctx))
   end, { buffer = ctx.bufnr, nowait = true, silent = true })
   vim.keymap.set("n", "L", function()
-    operations.toggle_dev(ctx, rows.row_at_cursor(ctx))
+    operations.toggle_dev(rows.row_at_cursor(ctx))
   end, { buffer = ctx.bufnr, nowait = true, silent = true })
   vim.keymap.set("n", "T", function()
     local row = rows.row_at_cursor(ctx)

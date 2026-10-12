@@ -1,6 +1,6 @@
 -- Loaded via `nvim --headless -u tests/minimal_init.lua -l <spec file>`.
 -- Isolates every XDG-derived directory under a fresh temp dir and puts this repo's lua/ on 'runtimepath'.
-local uv = vim.uv or vim.loop
+local uv = vim.uv
 
 local function repo_root()
   local source = debug.getinfo(1, "S").source:sub(2)

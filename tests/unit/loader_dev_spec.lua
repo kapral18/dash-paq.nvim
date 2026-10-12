@@ -4,6 +4,7 @@
 local t = require("runner")
 local dirfixture = require("support.dirfixture")
 local dev = require("dash_paq.loader.dev")
+local fs = require("dash_paq.fs")
 
 t.describe("parsing `git worktree list --porcelain` output (pure, no I/O)", function()
   t.it("parses a normal branch worktree entry", function()
@@ -14,14 +15,13 @@ t.describe("parsing `git worktree list --porcelain` output (pure, no I/O)", func
     t.assert.equals("abc123", entries[1].head)
     t.assert.equals("main", entries[1].branch)
     t.assert.falsy(entries[1].bare)
-    t.assert.falsy(entries[1].detached)
   end)
 
   t.it("parses a detached-HEAD worktree entry", function()
     local out = "worktree /repo/wt-detached\nHEAD abc123\ndetached\n"
     local entries = dev.parse_worktree_porcelain(out)
     t.assert.equals(1, #entries)
-    t.assert.truthy(entries[1].detached)
+    t.assert.equals("abc123", entries[1].head)
     t.assert.is_nil(entries[1].branch)
   end)
 
@@ -208,7 +208,7 @@ t.describe("dev.toggle_target: where a toggle switches to", function()
   local not_plugin = dirfixture.new("toggle-target-notplugin", { ["README.md"] = "just docs" })
 
   t.it("goes to the dev checkout from upstream (saved choice 'upstream')", function()
-    t.assert.equals(dev.normalize_path(base), dev.toggle_target(base, true, "upstream"))
+    t.assert.equals(fs.real_path(base), dev.toggle_target(base, true, "upstream"))
   end)
 
   t.it("goes to upstream when nothing is saved and the base exists (the default is already dev)", function()

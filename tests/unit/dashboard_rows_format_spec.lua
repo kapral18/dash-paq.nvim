@@ -206,4 +206,32 @@ t.describe("deriving a risk label", function()
   end)
 end)
 
+t.describe("rendering a dashboard with no visible rows", function()
+  local view = require("dash_paq.dashboard.ui.view")
+
+  local function last_line(rows_list, search_text)
+    local c = view.new_context({
+      bufnr = vim.api.nvim_create_buf(false, true),
+      rows = rows_list,
+      selected = {},
+      filter_mode = "all",
+      sort_mode = "status",
+      search_text = search_text,
+    })
+    view.render(c)
+    local lines = vim.api.nvim_buf_get_lines(c.bufnr, 0, -1, false)
+    return lines[#lines]
+  end
+
+  t.it("says no plugins are installed when there are no rows", function()
+    t.assert.equals("(No plugins installed)", last_line({}, nil))
+  end)
+
+  t.it("says the search hides every row when rows exist", function()
+    local line = last_line({ { name = "aaa", status = "same" }, { name = "bbb", status = "update" } }, "zzz")
+    t.assert.truthy(line:find("(0 of 2 shown", 1, true))
+    t.assert.truthy(line:find("search:'zzz'", 1, true))
+  end)
+end)
+
 t.finish()

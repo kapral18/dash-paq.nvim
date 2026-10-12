@@ -8,35 +8,24 @@
 -- (runtime/lua/vim/pack.lua's resolve_version + infer_revisions): HEAD vs the
 -- resolved target ref decides update/same, so dashboard statuses agree with
 -- what `vim.pack.update` itself would report.
-local notify = require("dash_paq.dashboard.report.notify")
+local notify = require("dash_paq.notify")
+local git = require("dash_paq.git")
+local config = require("dash_paq.config")
 local gitcmd = require("dash_paq.dashboard.analysis.gitcmd")
+local version_mod = require("dash_paq.dashboard.analysis.version")
 
 local M = {}
 
--- Env used for every git shell-out below: clears `GIT_DIR`/`GIT_WORK_TREE` so
--- a caller's own git-repo env vars never redirect these calls, matching
--- upstream vim.pack's `git_cmd`.
-local function clean_env()
-  local env = vim.fn.environ()
-  env.GIT_DIR = nil
-  env.GIT_WORK_TREE = nil
-  return env
-end
-
 local function git_capture(path, args, callback)
-  local cmd = { "git", "-C", path, "-c", "gc.auto=0" }
+  local cmd = { "-C", path, "-c", "gc.auto=0" }
   vim.list_extend(cmd, args)
-  vim.system(cmd, { text = true, env = clean_env(), clear_env = true }, function(out)
+  git.run(cmd, { text = true }, function(out)
     if out.code ~= 0 then
       callback(nil, vim.trim(out.stderr or out.stdout or "git error"))
       return
     end
     callback((out.stdout or ""):gsub("\n+$", ""), nil)
   end)
-end
-
-local function is_version_range(v)
-  return type(v) == "table" and type(v.has) == "function"
 end
 
 -- strict, like vim.pack
@@ -66,7 +55,7 @@ local function resolve_target_ref(path, version, done)
     return
   end
 
-  if is_version_range(version) then
+  if version_mod.is_version_range(version) then
     git_capture(path, { "tag", "--list", "--sort=-v:refname" }, function(out, err)
       if not out then
         done(nil, err or "no tags")
@@ -104,7 +93,7 @@ end
 -- Compute one plugin's offline status (HEAD vs target). `online` controls
 -- whether a `git fetch` runs first. `done(result)` receives:
 --   { name, path, source, status, rev_before, rev_after, error }
-local function refresh_one(target, online, env, done)
+local function refresh_one(target, online, done)
   local function finalize(status, rev_before, rev_after, err)
     done({
       name = target.name,
@@ -161,8 +150,7 @@ local function refresh_one(target, online, env, done)
     return
   end
 
-  vim.system({
-    "git",
+  git.run({
     "-c",
     "gc.auto=0",
     "fetch",
@@ -171,7 +159,7 @@ local function refresh_one(target, online, env, done)
     "--force",
     "--recurse-submodules=yes",
     "origin",
-  }, { cwd = target.path, text = true, env = env, clear_env = true }, function(out)
+  }, { cwd = target.path, text = true }, function(out)
     if out.code ~= 0 then
       finalize("error", nil, nil, vim.trim(out.stderr or out.stdout or "git fetch failed"))
       return
@@ -185,11 +173,11 @@ end
 --   online    - whether to `git fetch` before computing status
 --   on_each   - called once per plugin as it resolves, with the result table
 --   on_done   - called once after every plugin has resolved, with the count
--- Concurrency honors `state.dashboard_config.fetch_concurrency` (default 8).
+-- Concurrency honors `state.dashboard_config.fetch_concurrency`.
 function M.run(names, online, on_each, on_done)
   local ok, plugins = pcall(vim.pack.get, names, { info = false })
   if not ok or type(plugins) ~= "table" then
-    notify.notify_err("Failed to read vim.pack plugins")
+    notify.err("Failed to read vim.pack plugins")
     vim.schedule(function()
       on_done(0)
     end)
@@ -227,9 +215,8 @@ function M.run(names, online, on_each, on_done)
     return
   end
 
-  local env = clean_env()
-
-  local max_jobs = math.max(1, math.min(total, tonumber(state.dashboard_config.fetch_concurrency) or 8))
+  local concurrency = tonumber(state.dashboard_config.fetch_concurrency) or config.defaults.dashboard.fetch_concurrency
+  local max_jobs = math.max(1, math.min(total, concurrency))
   local next_index = 1
   local running = 0
   local done_count = 0
@@ -251,7 +238,7 @@ function M.run(names, online, on_each, on_done)
       local target = targets[next_index]
       next_index = next_index + 1
       running = running + 1
-      refresh_one(target, online, env, function(result)
+      refresh_one(target, online, function(result)
         running = running - 1
         done_count = done_count + 1
         -- Captured now: the scheduled callback runs later, after more results

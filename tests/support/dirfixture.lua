@@ -4,7 +4,7 @@ local M = {}
 local counter = 0
 local function tmp_dir(label)
   counter = counter + 1
-  local uv = vim.uv or vim.loop
+  local uv = vim.uv
   local base = (os.getenv("TMPDIR") or "/tmp"):gsub("/+$", "")
   local dir = string.format("%s/dash-paq-dirfixtures/%d-%d-%s", base, uv.os_getpid(), counter, label or "d")
   vim.fn.mkdir(dir, "p")
@@ -15,7 +15,7 @@ M.tmp_dir = tmp_dir
 
 -- A fresh temp dir under `namespace`; returns its path.
 function M.fresh_dir(namespace, label)
-  local uv = vim.uv or vim.loop
+  local uv = vim.uv
   local base = (os.getenv("TMPDIR") or "/tmp"):gsub("/+$", "")
   local dir = string.format("%s/%s/%d-%d-%s", base, namespace, uv.os_getpid(), uv.hrtime(), label)
   vim.fn.mkdir(dir, "p")

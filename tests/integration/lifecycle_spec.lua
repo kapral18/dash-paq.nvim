@@ -15,12 +15,12 @@ end
 
 local startsrc = gitfixture.new_remote("lc-startsrc")
 gitfixture.commit(startsrc, "feat: initial", {
-  ["plugin/init.lua"] = [[_G.PC.counts.startsrc_plugin = (_G.PC.counts.startsrc_plugin or 0) + 1]],
-  ["after/plugin/init.lua"] = [[_G.PC.counts.startsrc_after = (_G.PC.counts.startsrc_after or 0) + 1]],
+  ["plugin/init.lua"] = [[_G.DASH_PAQ_TEST.counts.startsrc_plugin = (_G.DASH_PAQ_TEST.counts.startsrc_plugin or 0) + 1]],
+  ["after/plugin/init.lua"] = [[_G.DASH_PAQ_TEST.counts.startsrc_after = (_G.DASH_PAQ_TEST.counts.startsrc_after or 0) + 1]],
   ["lua/lcstartsrcmod/init.lua"] = [[
 local M = {}
 function M.hi()
-  _G.PC.log[#_G.PC.log + 1] = "startsrc-config-ok"
+  _G.DASH_PAQ_TEST.log[#_G.DASH_PAQ_TEST.log + 1] = "startsrc-config-ok"
 end
 return M
 ]],
@@ -29,30 +29,30 @@ gitfixture.push(startsrc)
 
 local cmdtrigsrc = gitfixture.new_remote("lc-cmdtrigsrc")
 gitfixture.commit(cmdtrigsrc, "feat: initial", {
-  ["plugin/init.lua"] = [[_G.PC.counts.cmdtrigsrc_plugin = (_G.PC.counts.cmdtrigsrc_plugin or 0) + 1]],
+  ["plugin/init.lua"] = [[_G.DASH_PAQ_TEST.counts.cmdtrigsrc_plugin = (_G.DASH_PAQ_TEST.counts.cmdtrigsrc_plugin or 0) + 1]],
 })
 gitfixture.push(cmdtrigsrc)
 
 local fttrigsrc = gitfixture.new_remote("lc-fttrigsrc")
 gitfixture.commit(fttrigsrc, "feat: initial", {
-  ["plugin/init.lua"] = [[_G.PC.counts.fttrigsrc_plugin = (_G.PC.counts.fttrigsrc_plugin or 0) + 1]],
-  ["after/plugin/init.lua"] = [[_G.PC.counts.fttrigsrc_after = (_G.PC.counts.fttrigsrc_after or 0) + 1]],
+  ["plugin/init.lua"] = [[_G.DASH_PAQ_TEST.counts.fttrigsrc_plugin = (_G.DASH_PAQ_TEST.counts.fttrigsrc_plugin or 0) + 1]],
+  ["after/plugin/init.lua"] = [[_G.DASH_PAQ_TEST.counts.fttrigsrc_after = (_G.DASH_PAQ_TEST.counts.fttrigsrc_after or 0) + 1]],
   ["ftdetect/custom.lua"] = [[
 vim.filetype.add({ extension = { lcft = "lcft" } })
-_G.PC.counts.fttrigsrc_ftdetect = (_G.PC.counts.fttrigsrc_ftdetect or 0) + 1
+_G.DASH_PAQ_TEST.counts.fttrigsrc_ftdetect = (_G.DASH_PAQ_TEST.counts.fttrigsrc_ftdetect or 0) + 1
 ]],
 })
 gitfixture.push(fttrigsrc)
 
 local startbuild = gitfixture.new_remote("lc-startbuild")
 gitfixture.commit(startbuild, "feat: initial", {
-  ["plugin/init.lua"] = [[_G.PC.counts.startbuild_plugin = (_G.PC.counts.startbuild_plugin or 0) + 1]],
+  ["plugin/init.lua"] = [[_G.DASH_PAQ_TEST.counts.startbuild_plugin = (_G.DASH_PAQ_TEST.counts.startbuild_plugin or 0) + 1]],
 })
 gitfixture.push(startbuild)
 
 local msbuild = gitfixture.new_remote("lc-msbuild")
 gitfixture.commit(msbuild, "feat: initial", {
-  ["plugin/init.lua"] = [[_G.PC.counts.msbuild_plugin = (_G.PC.counts.msbuild_plugin or 0) + 1]],
+  ["plugin/init.lua"] = [[_G.DASH_PAQ_TEST.counts.msbuild_plugin = (_G.DASH_PAQ_TEST.counts.msbuild_plugin or 0) + 1]],
 })
 gitfixture.push(msbuild)
 
@@ -62,19 +62,19 @@ local depstart_dir = fresh_dir("depstart")
 dirfixture.write(
   depstart_dir,
   "plugin/init.lua",
-  [[_G.PC.counts.depstart_plugin = (_G.PC.counts.depstart_plugin or 0) + 1]]
+  [[_G.DASH_PAQ_TEST.counts.depstart_plugin = (_G.DASH_PAQ_TEST.counts.depstart_plugin or 0) + 1]]
 )
 
 local startdirmain_dir = fresh_dir("startdirmain")
 dirfixture.write(
   startdirmain_dir,
   "plugin/init.lua",
-  [[_G.PC.counts.startdirmain_plugin = (_G.PC.counts.startdirmain_plugin or 0) + 1]]
+  [[_G.DASH_PAQ_TEST.counts.startdirmain_plugin = (_G.DASH_PAQ_TEST.counts.startdirmain_plugin or 0) + 1]]
 )
 dirfixture.write(startdirmain_dir, "lua/lcstartdirmainmod/init.lua", {
   "local M = {}",
   "function M.hi()",
-  [[  _G.PC.log[#_G.PC.log + 1] = "startdirmain-config-ok"]],
+  [[  _G.DASH_PAQ_TEST.log[#_G.DASH_PAQ_TEST.log + 1] = "startdirmain-config-ok"]],
   "end",
   "return M",
 })
@@ -83,49 +83,49 @@ local startlazyfalsekeys_dir = fresh_dir("startlazyfalsekeys")
 dirfixture.write(
   startlazyfalsekeys_dir,
   "plugin/init.lua",
-  [[_G.PC.counts.startlazyfalsekeys_plugin = (_G.PC.counts.startlazyfalsekeys_plugin or 0) + 1]]
+  [[_G.DASH_PAQ_TEST.counts.startlazyfalsekeys_plugin = (_G.DASH_PAQ_TEST.counts.startlazyfalsekeys_plugin or 0) + 1]]
 )
 
 local depdeferdep_dir = fresh_dir("depdeferdep")
 dirfixture.write(
   depdeferdep_dir,
   "plugin/init.lua",
-  [[_G.PC.counts.depdeferdep_plugin = (_G.PC.counts.depdeferdep_plugin or 0) + 1]]
+  [[_G.DASH_PAQ_TEST.counts.depdeferdep_plugin = (_G.DASH_PAQ_TEST.counts.depdeferdep_plugin or 0) + 1]]
 )
 
 local deferwithdep_dir = fresh_dir("deferwithdep")
 dirfixture.write(
   deferwithdep_dir,
   "plugin/init.lua",
-  [[_G.PC.counts.deferwithdep_plugin = (_G.PC.counts.deferwithdep_plugin or 0) + 1]]
+  [[_G.DASH_PAQ_TEST.counts.deferwithdep_plugin = (_G.DASH_PAQ_TEST.counts.deferwithdep_plugin or 0) + 1]]
 )
 
 local keytrig_dir = fresh_dir("keytrig")
 dirfixture.write(
   keytrig_dir,
   "plugin/init.lua",
-  [[_G.PC.counts.keytrig_plugin = (_G.PC.counts.keytrig_plugin or 0) + 1]]
+  [[_G.DASH_PAQ_TEST.counts.keytrig_plugin = (_G.DASH_PAQ_TEST.counts.keytrig_plugin or 0) + 1]]
 )
 
 local eventfiletrig_dir = fresh_dir("eventfiletrig")
 dirfixture.write(
   eventfiletrig_dir,
   "plugin/init.lua",
-  [[_G.PC.counts.eventfiletrig_plugin = (_G.PC.counts.eventfiletrig_plugin or 0) + 1]]
+  [[_G.DASH_PAQ_TEST.counts.eventfiletrig_plugin = (_G.DASH_PAQ_TEST.counts.eventfiletrig_plugin or 0) + 1]]
 )
 
 local eventpatterntrig_dir = fresh_dir("eventpatterntrig")
 dirfixture.write(
   eventpatterntrig_dir,
   "plugin/init.lua",
-  [[_G.PC.counts.eventpatterntrig_plugin = (_G.PC.counts.eventpatterntrig_plugin or 0) + 1]]
+  [[_G.DASH_PAQ_TEST.counts.eventpatterntrig_plugin = (_G.DASH_PAQ_TEST.counts.eventpatterntrig_plugin or 0) + 1]]
 )
 
 local ftkeytrig_dir = fresh_dir("ftkeytrig")
 dirfixture.write(
   ftkeytrig_dir,
   "plugin/init.lua",
-  [[_G.PC.counts.ftkeytrig_plugin = (_G.PC.counts.ftkeytrig_plugin or 0) + 1]]
+  [[_G.DASH_PAQ_TEST.counts.ftkeytrig_plugin = (_G.DASH_PAQ_TEST.counts.ftkeytrig_plugin or 0) + 1]]
 )
 
 -- lhs-only key whose plugin never redefines it: the stub must be gone before the replay, or it recurses forever.
@@ -133,26 +133,26 @@ local unreplacedkeytrig_dir = fresh_dir("unreplacedkeytrig")
 dirfixture.write(
   unreplacedkeytrig_dir,
   "plugin/init.lua",
-  [[_G.PC.counts.unreplacedkeytrig_plugin = (_G.PC.counts.unreplacedkeytrig_plugin or 0) + 1]]
+  [[_G.DASH_PAQ_TEST.counts.unreplacedkeytrig_plugin = (_G.DASH_PAQ_TEST.counts.unreplacedkeytrig_plugin or 0) + 1]]
 )
 
 local packloadtrig_dir = fresh_dir("packloadtrig")
 dirfixture.write(
   packloadtrig_dir,
   "plugin/init.lua",
-  [[_G.PC.counts.packloadtrig_plugin = (_G.PC.counts.packloadtrig_plugin or 0) + 1]]
+  [[_G.DASH_PAQ_TEST.counts.packloadtrig_plugin = (_G.DASH_PAQ_TEST.counts.packloadtrig_plugin or 0) + 1]]
 )
 
 local lateload_dir = fresh_dir("lateload")
 dirfixture.write(
   lateload_dir,
   "plugin/init.lua",
-  [[_G.PC.counts.lateload_plugin = (_G.PC.counts.lateload_plugin or 0) + 1]]
+  [[_G.DASH_PAQ_TEST.counts.lateload_plugin = (_G.DASH_PAQ_TEST.counts.lateload_plugin or 0) + 1]]
 )
 dirfixture.write(lateload_dir, "lua/lclatemod/init.lua", {
   "local M = {}",
   "function M.hi()",
-  [[  _G.PC.log[#_G.PC.log + 1] = "lateload-config-ok"]],
+  [[  _G.DASH_PAQ_TEST.log[#_G.DASH_PAQ_TEST.log + 1] = "lateload-config-ok"]],
   "end",
   "return M",
 })
@@ -163,11 +163,11 @@ local lateftdep_dir = fresh_dir("lateftdep")
 dirfixture.write(
   lateftdep_dir,
   "plugin/init.lua",
-  [[_G.PC.counts.lateftdep_plugin = (_G.PC.counts.lateftdep_plugin or 0) + 1]]
+  [[_G.DASH_PAQ_TEST.counts.lateftdep_plugin = (_G.DASH_PAQ_TEST.counts.lateftdep_plugin or 0) + 1]]
 )
 dirfixture.write(lateftdep_dir, "ftdetect/custom.lua", {
   "vim.filetype.add({ extension = { lclateftdep = 'lclateftdep' } })",
-  "_G.PC.counts.lateftdep_ftdetect = (_G.PC.counts.lateftdep_ftdetect or 0) + 1",
+  "_G.DASH_PAQ_TEST.counts.lateftdep_ftdetect = (_G.DASH_PAQ_TEST.counts.lateftdep_ftdetect or 0) + 1",
 })
 
 -- Files for the event-file / ft-trigger buffer scenarios below.
@@ -186,8 +186,8 @@ local init_lines = {
   "vim.opt.shadafile = 'NONE'",
   "vim.opt.swapfile = false",
   string.format("vim.opt.rtp:prepend(%q)", ROOT),
-  "_G.PC = { counts = {}, log = {}, checks = {} }",
-  [[_G.PC_EXPR = function() _G.PC.counts.f3_expr = (_G.PC.counts.f3_expr or 0) + 1 return "" end]],
+  "_G.DASH_PAQ_TEST = { counts = {}, log = {}, checks = {} }",
+  [[_G.DASH_PAQ_EXPR = function() _G.DASH_PAQ_TEST.counts.f3_expr = (_G.DASH_PAQ_TEST.counts.f3_expr or 0) + 1 return "" end]],
   "vim.filetype.add({ extension = { lcft2 = 'lcft2' } })",
   "require('dash_paq').setup({",
   "  dashboard = false,",
@@ -197,7 +197,7 @@ local init_lines = {
   string.format(
     "    { src = %q, name = 'lc_startsrc', priority = 100, config = function() "
       .. "local ok, m = pcall(require, 'lcstartsrcmod'); if ok then m.hi() else "
-      .. "_G.PC.log[#_G.PC.log + 1] = 'startsrc-require-failed' end end },",
+      .. "_G.DASH_PAQ_TEST.log[#_G.DASH_PAQ_TEST.log + 1] = 'startsrc-require-failed' end end },",
     startsrc.src
   ),
   -- Dependency of a startup entry (dir), pulled in before its dependent.
@@ -207,21 +207,21 @@ local init_lines = {
     "    { dir = %q, name = 'lc_startdirmain', priority = 60, "
       .. "dependencies = { { dir = %q, name = 'lc_depstart' } }, "
       .. "config = function() local ok, m = pcall(require, 'lcstartdirmainmod'); "
-      .. "if ok then m.hi() else _G.PC.log[#_G.PC.log + 1] = 'startdirmain-require-failed' end end },",
+      .. "if ok then m.hi() else _G.DASH_PAQ_TEST.log[#_G.DASH_PAQ_TEST.log + 1] = 'startdirmain-require-failed' end end },",
     startdirmain_dir,
     depstart_dir
   ),
   -- Startup, lazy = false + keys: every key with rhs must become a real mapping regardless.
   string.format(
     "    { dir = %q, name = 'lc_startlazyfalsekeys', lazy = false, priority = 10, "
-      .. "keys = { { '<F21>', function() _G.PC.counts.f21 = (_G.PC.counts.f21 or 0) + 1 end } } },",
+      .. "keys = { { '<F21>', function() _G.DASH_PAQ_TEST.counts.f21 = (_G.DASH_PAQ_TEST.counts.f21 or 0) + 1 end } } },",
     startlazyfalsekeys_dir
   ),
   -- Startup with a build hook: must run on VimEnter with the plugin already loaded.
   string.format(
     "    { src = %q, name = 'lc_startbuild', build = function() "
-      .. "_G.PC.checks.startbuild_loaded_at_build = (_G.PC.counts.startbuild_plugin or 0) > 0; "
-      .. "_G.PC.counts.startbuild_build = (_G.PC.counts.startbuild_build or 0) + 1 end },",
+      .. "_G.DASH_PAQ_TEST.checks.startbuild_loaded_at_build = (_G.DASH_PAQ_TEST.counts.startbuild_plugin or 0) > 0; "
+      .. "_G.DASH_PAQ_TEST.counts.startbuild_build = (_G.DASH_PAQ_TEST.counts.startbuild_build or 0) + 1 end },",
     startbuild.src
   ),
   -- Dependency of a deferred entry: only loads when the deferred entry does.
@@ -230,7 +230,7 @@ local init_lines = {
     "    { dir = %q, name = 'lc_deferwithdep', cmd = 'LcDeferDepCmd', "
       .. "dependencies = { { dir = %q, name = 'lc_depdeferdep' } }, "
       .. "config = function() vim.api.nvim_create_user_command('LcDeferDepCmd', function() "
-      .. "_G.PC.counts.deferwithdep_cmd_ran = (_G.PC.counts.deferwithdep_cmd_ran or 0) + 1 end, {}) end },",
+      .. "_G.DASH_PAQ_TEST.counts.deferwithdep_cmd_ran = (_G.DASH_PAQ_TEST.counts.deferwithdep_cmd_ran or 0) + 1 end, {}) end },",
     deferwithdep_dir,
     depdeferdep_dir
   ),
@@ -238,19 +238,19 @@ local init_lines = {
   string.format(
     "    { src = %q, name = 'lc_cmdtrigsrc', cmd = 'LcCmdTrig', "
       .. "config = function() vim.api.nvim_create_user_command('LcCmdTrig', function() "
-      .. "_G.PC.counts.cmdtrigsrc_cmd_ran = (_G.PC.counts.cmdtrigsrc_cmd_ran or 0) + 1 end, {}) end },",
+      .. "_G.DASH_PAQ_TEST.counts.cmdtrigsrc_cmd_ran = (_G.DASH_PAQ_TEST.counts.cmdtrigsrc_cmd_ran or 0) + 1 end, {}) end },",
     cmdtrigsrc.src
   ),
   -- Multi-key entry: function/string/expr/lhs-only rhs, plus an operator-pending lhs-only key (mode n+o).
   string.format(
     "    { dir = %q, name = 'lc_keytrig', keys = {"
-      .. " { '<F1>', function() _G.PC.counts.f1 = (_G.PC.counts.f1 or 0) + 1 end },"
-      .. " { '<F2>', '<cmd>lua _G.PC.counts.f2 = (_G.PC.counts.f2 or 0) + 1<cr>' },"
-      .. " { '<F3>', 'v:lua.PC_EXPR()', expr = true },"
+      .. " { '<F1>', function() _G.DASH_PAQ_TEST.counts.f1 = (_G.DASH_PAQ_TEST.counts.f1 or 0) + 1 end },"
+      .. " { '<F2>', '<cmd>lua _G.DASH_PAQ_TEST.counts.f2 = (_G.DASH_PAQ_TEST.counts.f2 or 0) + 1<cr>' },"
+      .. " { '<F3>', 'v:lua.DASH_PAQ_EXPR()', expr = true },"
       .. " { '<F4>' },"
       .. " { '<F22>', mode = { 'n', 'o' } },"
       .. " }, config = function()"
-      .. " vim.keymap.set('n', '<F4>', function() _G.PC.counts.f4 = (_G.PC.counts.f4 or 0) + 1 end)"
+      .. " vim.keymap.set('n', '<F4>', function() _G.DASH_PAQ_TEST.counts.f4 = (_G.DASH_PAQ_TEST.counts.f4 or 0) + 1 end)"
       .. " vim.keymap.set({ 'n', 'o' }, '<F22>', 'e', {})"
       .. " end },",
     keytrig_dir
@@ -270,7 +270,7 @@ local init_lines = {
   -- ft-scoped key on a separate entry, not tied to this entry's own ftdetect.
   string.format(
     "    { dir = %q, name = 'lc_ftkeytrig', keys = { { '<F9>', function() "
-      .. "_G.PC.counts.f9 = (_G.PC.counts.f9 or 0) + 1 end, ft = 'lcft2' } } },",
+      .. "_G.DASH_PAQ_TEST.counts.f9 = (_G.DASH_PAQ_TEST.counts.f9 or 0) + 1 end, ft = 'lcft2' } } },",
     ftkeytrig_dir
   ),
   -- lhs-only key, no config: the replay must not recurse into a stub that should already be gone.
@@ -282,9 +282,9 @@ local init_lines = {
     "    { src = %q, name = 'lc_msbuild', cmd = 'LcMs', build = ':LcMsUpdate', opts = {}, "
       .. "config = function()"
       .. " vim.api.nvim_create_user_command('LcMs', function() "
-      .. "_G.PC.counts.ms_ran = (_G.PC.counts.ms_ran or 0) + 1 end, {})"
+      .. "_G.DASH_PAQ_TEST.counts.ms_ran = (_G.DASH_PAQ_TEST.counts.ms_ran or 0) + 1 end, {})"
       .. " vim.api.nvim_create_user_command('LcMsUpdate', function() "
-      .. "_G.PC.counts.msupdate_ran = (_G.PC.counts.msupdate_ran or 0) + 1 end, {})"
+      .. "_G.DASH_PAQ_TEST.counts.msupdate_ran = (_G.DASH_PAQ_TEST.counts.msupdate_ran or 0) + 1 end, {})"
       .. " end },",
     msbuild.src
   ),
@@ -294,7 +294,7 @@ local init_lines = {
       .. "dependencies = { { dir = %q, name = 'lc_lateftdep', ft = 'lclateftdep' } }, "
       .. "config = function() "
       .. "local ok, m = pcall(require, 'lclatemod'); if ok then m.hi() else "
-      .. "_G.PC.log[#_G.PC.log + 1] = 'lateload-require-failed' end end },",
+      .. "_G.DASH_PAQ_TEST.log[#_G.DASH_PAQ_TEST.log + 1] = 'lateload-require-failed' end end },",
     lateload_dir,
     lateftdep_dir
   ),
@@ -303,7 +303,7 @@ local init_lines = {
   -- Capture rtp order right after setup() returns, before any deferred load inserts anything else.
   [[local function rtp_idx_dir(path) local expanded = vim.fn.expand(path) for i, p in ipairs(vim.opt.rtp:get()) do if p == expanded then return i end end return -1 end]],
   [[local function rtp_idx_src(name) local ok, info = pcall(vim.pack.get, { name }, { info = false }) if ok and info[1] then for i, p in ipairs(vim.opt.rtp:get()) do if p == info[1].path then return i end end end return -1 end]],
-  "_G.PC.rtp_idx = {",
+  "_G.DASH_PAQ_TEST.rtp_idx = {",
   "  startsrc = rtp_idx_src('lc_startsrc'),",
   string.format("  depstart = rtp_idx_dir(%q),", depstart_dir),
   string.format("  startdirmain = rtp_idx_dir(%q),", startdirmain_dir),
@@ -329,7 +329,7 @@ local init_lines = {
   "    vim.api.nvim_buf_set_lines(opbuf, 0, -1, false, { 'hello world foo' })",
   "    vim.api.nvim_win_set_cursor(0, { 1, 0 })",
   "    press('d<F22>')",
-  "    _G.PC.checks.f22_delete_result = vim.api.nvim_buf_get_lines(opbuf, 0, -1, false)[1]",
+  "    _G.DASH_PAQ_TEST.checks.f22_delete_result = vim.api.nvim_buf_get_lines(opbuf, 0, -1, false)[1]",
   -- Dependency of a deferred entry.
   "    vim.cmd('LcDeferDepCmd')",
   -- cmd trigger (`src`).
@@ -339,9 +339,9 @@ local init_lines = {
   "    vim.api.nvim_exec_autocmds('User', { pattern = 'LcUserEvent' })",
   -- ft trigger (src, own ftdetect) — two buffers, ftdetect must fire once.
   string.format("    vim.cmd('edit %s')", ft_target_a),
-  "    _G.PC.checks.lcft_a = vim.bo.filetype",
+  "    _G.DASH_PAQ_TEST.checks.lcft_a = vim.bo.filetype",
   string.format("    vim.cmd('edit %s')", ft_target_b),
-  "    _G.PC.checks.lcft_b = vim.bo.filetype",
+  "    _G.DASH_PAQ_TEST.checks.lcft_b = vim.bo.filetype",
   -- ft-scoped key: press in the first lcft2 buffer, confirm the mapping is also set in a second one, unpressed.
   "    local ftbuf1 = vim.api.nvim_create_buf(true, false)",
   "    vim.api.nvim_set_current_buf(ftbuf1)",
@@ -350,14 +350,14 @@ local init_lines = {
   "    local ftbuf2 = vim.api.nvim_create_buf(true, false)",
   "    vim.api.nvim_set_current_buf(ftbuf2)",
   "    vim.bo[ftbuf2].filetype = 'lcft2'",
-  "    _G.PC.checks.f9_mapped_buf2 = vim.fn.maparg('<F9>', 'n', false, true).callback ~= nil",
+  "    _G.DASH_PAQ_TEST.checks.f9_mapped_buf2 = vim.fn.maparg('<F9>', 'n', false, true).callback ~= nil",
   "    press('<F9>')",
   -- `:DashPaq load`.
   "    vim.cmd('DashPaq load lc_packloadtrig')",
   -- Build already ran (queued to this VimEnter); confirm the real Ms command still works afterward.
-  "    _G.PC.checks.ms_exists_before_manual_call = vim.fn.exists(':LcMs')",
+  "    _G.DASH_PAQ_TEST.checks.ms_exists_before_manual_call = vim.fn.exists(':LcMs')",
   "    vim.cmd('LcMs')",
-  string.format("    vim.fn.writefile({ vim.json.encode(_G.PC) }, %q)", out_path),
+  string.format("    vim.fn.writefile({ vim.json.encode(_G.DASH_PAQ_TEST) }, %q)", out_path),
   "    vim.cmd('qa!')",
   "  end)",
   "end })",

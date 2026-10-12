@@ -10,6 +10,11 @@
 # shift; exec @ARGV' <secs> <cmd...>` is used for this instead of GNU
 # coreutils `timeout(1)`, which is not preinstalled on macOS runners; `perl`
 # ships with both macOS and Ubuntu.
+#
+# Every temp dir the specs and their fixtures create lives under one per-run
+# `TMPDIR`, removed on exit. It sits under /tmp, not the inherited `TMPDIR`:
+# macOS's long `/var/folders/...` prefix would push the nested
+# `XDG_RUNTIME_DIR` server socket path past its 104-byte limit.
 set -u
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -20,6 +25,10 @@ if [ "$#" -eq 0 ]; then
   echo "run_specs.sh: no spec files given" >&2
   exit 1
 fi
+
+tmp_root="$(mktemp -d /tmp/dash-paq.XXXXXX)" || exit 1
+trap 'rm -rf "$tmp_root"' EXIT
+export TMPDIR="$tmp_root"
 
 total=0
 for spec in "$@"; do

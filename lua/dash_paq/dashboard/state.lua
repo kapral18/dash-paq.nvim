@@ -1,3 +1,5 @@
+local fs = require("dash_paq.fs")
+
 local M = {}
 
 M.pack_report_cache = {
@@ -25,6 +27,9 @@ M.dev_capable_cache = {}
 M.version_flags_cache = {}
 M.version_flags_scan_running = false
 M.version_flags_scanned = false
+-- hrtime of the last cursor line change in any dashboard window; shared so a
+-- reopened dashboard still holds the applies of an op started in a closed one.
+M.last_cursor_move = nil
 
 -- Resolved opts.dashboard.
 M.dashboard_config = {}
@@ -36,14 +41,7 @@ function M.set_dashboard_config(cfg)
 end
 
 local function persisted_state_path()
-  return vim.fs.joinpath(vim.fn.stdpath("state"), "dash-paq", "dashboard_state.json")
-end
-
-local function ensure_state_dir()
-  local dir = vim.fs.dirname(persisted_state_path())
-  if vim.fn.isdirectory(dir) ~= 1 then
-    pcall(vim.fn.mkdir, dir, "p")
-  end
+  return fs.state_path("dashboard_state.json")
 end
 
 -- Record the set of plugin names declared by the active plugin specs so the
@@ -143,12 +141,7 @@ function M.write_persisted_state()
       search_text = ui.search_text,
     },
   }
-  local ok_json, encoded = pcall(vim.json.encode, payload)
-  if not ok_json or type(encoded) ~= "string" or encoded == "" then
-    return
-  end
-  ensure_state_dir()
-  pcall(vim.fn.writefile, { encoded }, persisted_state_path())
+  fs.write_json(persisted_state_path(), payload)
 end
 
 function M.load_persisted_state_once()
@@ -157,18 +150,8 @@ function M.load_persisted_state_once()
   end
   M.persisted_state_loaded = true
 
-  local path = persisted_state_path()
-  if vim.fn.filereadable(path) ~= 1 then
-    return
-  end
-
-  local ok_read, file_lines = pcall(vim.fn.readfile, path)
-  if not ok_read or type(file_lines) ~= "table" or #file_lines == 0 then
-    return
-  end
-
-  local ok_decode, decoded = pcall(vim.json.decode, table.concat(file_lines, "\n"))
-  if not ok_decode or type(decoded) ~= "table" then
+  local decoded = fs.read_json(persisted_state_path())
+  if not decoded then
     return
   end
 

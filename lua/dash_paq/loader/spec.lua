@@ -3,12 +3,19 @@
 local M = {}
 
 local semver = require("dash_paq.semver")
+local notify = require("dash_paq.notify")
 
-local function default_notify_err(msg)
-  vim.schedule(function()
-    vim.notify(msg, vim.log.levels.ERROR)
-  end)
-end
+---@class dash_paq.Entry
+---@field name string
+---@field index integer spec order of the entry's first spec
+---@field specs table[] every spec merged into this entry
+---@field deps table<string, true> dependency entry names
+---@field src string? git source; nil when no spec gives one (a `dir`-only entry)
+---@field dir string? local directory
+---@field is_dev boolean
+---@field dev_base string? per-plugin dev base dir, from a string `spec.dev`
+---@field enabled boolean
+---@field dep_only boolean true while only `dependencies` declared it
 
 function M.as_list(value)
   if value == nil then
@@ -97,7 +104,7 @@ end
 -- semantics): an lhs-only spec has no `rhs`, and the trigger replays the
 -- lhs itself once the plugin (and its real mapping) has loaded.
 function M.normalize_key_specs(specs, plugin_spec, notify_err)
-  notify_err = notify_err or default_notify_err
+  notify_err = notify_err or notify.err
   if type(specs) == "function" then
     local ok, resolved = pcall(specs, plugin_spec, {})
     if not ok then
@@ -187,7 +194,7 @@ end
 -- opts: { dev?, default_host?, notify_err? }
 function M.flatten_specs(module_names, direct_specs, opts)
   opts = opts or {}
-  local notify_err = opts.notify_err or default_notify_err
+  local notify_err = opts.notify_err or notify.err
   local default_host = opts.default_host
   local dev_cfg = opts.dev
 
@@ -209,8 +216,6 @@ function M.flatten_specs(module_names, direct_specs, opts)
       src = nil,
       dir = nil,
       is_dev = false,
-      -- Per-plugin dev base dir, from a string `spec.dev`; nil uses
-      -- the shared `dev.path/<name>` convention (`loader/dev.lua`).
       dev_base = nil,
       enabled = true,
       dep_only = true,
@@ -275,8 +280,7 @@ function M.flatten_specs(module_names, direct_specs, opts)
         end
       elseif type(dep) == "table" then
         local dep_entry = add_spec(dep, true)
-        local is_optional_dep = dep and (dep.optional == true or dep.opt == true)
-        if dep_entry and not is_optional_dep then
+        if dep_entry and dep.optional ~= true then
           entry.deps[dep_entry.name] = true
         end
       end
@@ -305,7 +309,7 @@ function M.flatten_specs(module_names, direct_specs, opts)
 end
 
 function M.resolve_opts(entry, notify_err)
-  notify_err = notify_err or default_notify_err
+  notify_err = notify_err or notify.err
   local opts = {}
   local has_opts = false
   for _, spec in ipairs(entry.specs) do

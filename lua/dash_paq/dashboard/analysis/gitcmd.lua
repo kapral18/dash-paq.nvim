@@ -1,4 +1,5 @@
 local semver = require("dash_paq.semver")
+local git = require("dash_paq.git")
 
 local M = {}
 
@@ -23,9 +24,9 @@ local function git_tags(path, args, cache, key)
     return cache[key]
   end
 
-  local command = { "git", "-C", path, "tag" }
+  local command = { "-C", path, "tag" }
   vim.list_extend(command, args)
-  local result = vim.system(command, { text = true }):wait()
+  local result = git.run(command, { text = true }):wait()
   if result.code ~= 0 or type(result.stdout) ~= "string" then
     cache[key] = {}
     return cache[key]
@@ -72,11 +73,11 @@ local function tag_gt(a, b)
 end
 
 -- The sync (`:wait()`) functions below and `M.prefetch_range`'s async spawns
--- build the SAME argv and parse the SAME `vim.system` result shape through
+-- build the SAME git args and parse the SAME `vim.system` result shape through
 -- these helpers, so the two call paths cannot diverge.
 
 local function tag_on_revision_cmd(path, rev)
-  return { "git", "-C", path, "tag", "--points-at", rev }
+  return { "-C", path, "tag", "--points-at", rev }
 end
 
 -- Picks the single semver-greatest tag pointing at `rev` (or `false` on a
@@ -114,14 +115,14 @@ local function range_key(path, rev_before, rev_after)
 end
 
 local function commit_messages_cmd(path, rev_before, rev_after)
-  return { "git", "-C", path, "log", "--format=%s%n%b", rev_before .. ".." .. rev_after }
+  return { "-C", path, "log", "--format=%s%n%b", rev_before .. ".." .. rev_after }
 end
 
 -- Rebuilds the "Pending updates:" text for a row refreshed by the per-row
 -- pipeline rather than the `:DashPaq sync`/`:DashPaq status` report parser, in the
 -- same `hash │ subject`-per-line shape `popups.lua` parses.
 local function pending_updates_cmd(path, rev_before, rev_after)
-  return { "git", "-C", path, "log", "--format=%h │ %s", rev_before .. ".." .. rev_after }
+  return { "-C", path, "log", "--format=%h │ %s", rev_before .. ".." .. rev_after }
 end
 
 -- Trims stdout to `false` (git failure / empty range), matching both the
@@ -143,7 +144,7 @@ local function tag_on_revision(path, rev)
     return revision_tag_cache[key] or nil
   end
 
-  local result = vim.system(tag_on_revision_cmd(path, rev), { text = true }):wait()
+  local result = git.run(tag_on_revision_cmd(path, rev), { text = true }):wait()
   revision_tag_cache[key] = parse_tag_on_revision(result)
   return revision_tag_cache[key] or nil
 end
@@ -157,7 +158,7 @@ local function commit_messages_between(path, rev_before, rev_after)
     return commit_messages_cache[key] or nil
   end
 
-  local result = vim.system(commit_messages_cmd(path, rev_before, rev_after), { text = true }):wait()
+  local result = git.run(commit_messages_cmd(path, rev_before, rev_after), { text = true }):wait()
   commit_messages_cache[key] = parse_trimmed_or_false(result)
   return commit_messages_cache[key] or nil
 end
@@ -177,8 +178,8 @@ local function commit_records_between(path, rev_before, rev_after)
     return commit_records_cache[key] or nil
   end
 
-  local result = vim
-    .system({ "git", "-C", path, "log", "--format=%h%x1f%s%n%b%x1e", rev_before .. ".." .. rev_after }, { text = true })
+  local result = git
+    .run({ "-C", path, "log", "--format=%h%x1f%s%n%b%x1e", rev_before .. ".." .. rev_after }, { text = true })
     :wait()
   if result.code ~= 0 or type(result.stdout) ~= "string" then
     commit_records_cache[key] = false
@@ -206,7 +207,7 @@ local function pending_updates_between(path, rev_before, rev_after)
     return pending_updates_cache[key] or nil
   end
 
-  local result = vim.system(pending_updates_cmd(path, rev_before, rev_after), { text = true }):wait()
+  local result = git.run(pending_updates_cmd(path, rev_before, rev_after), { text = true }):wait()
   pending_updates_cache[key] = parse_trimmed_or_false(result)
   return pending_updates_cache[key] or nil
 end
@@ -215,7 +216,7 @@ end
 -- functions above run per "update" row (`tag_on_revision` x2, plus
 -- `commit_messages_between`/`pending_updates_between` for the same range):
 -- spawns them in parallel via `vim.system` callbacks (never `:wait()`, so this
--- never blocks the main thread), using the SAME argv builders and result
+-- never blocks the main thread), using the SAME git-args builders and result
 -- parsers as the sync path above, into the SAME caches/keys, so a later sync
 -- call for the same path/rev(s) is a pure cache hit. Skips any query whose
 -- cache slot is already filled. `done` is always called exactly once, even
@@ -230,7 +231,7 @@ function M.prefetch_range(path, rev_before, rev_after, done)
 
   local function queue(cmd, cache, key)
     jobs[#jobs + 1] = function(job_done)
-      vim.system(cmd, { text = true }, function(result)
+      git.run(cmd, { text = true }, function(result)
         cache[key] = parse_trimmed_or_false(result)
         vim.schedule(job_done)
       end)
@@ -243,7 +244,7 @@ function M.prefetch_range(path, rev_before, rev_after, done)
       return
     end
     jobs[#jobs + 1] = function(job_done)
-      vim.system(tag_on_revision_cmd(path, rev), { text = true }, function(result)
+      git.run(tag_on_revision_cmd(path, rev), { text = true }, function(result)
         revision_tag_cache[key] = parse_tag_on_revision(result)
         vim.schedule(job_done)
       end)

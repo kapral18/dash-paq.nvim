@@ -87,18 +87,18 @@ links for it in the dashboard. Every field and its default: `:h dash-paq-config`
 
 Everything is a subcommand of `:DashPaq`; subcommands and their arguments complete with `<Tab>`.
 
-| Command                                 | Purpose                                                             |
-| --------------------------------------- | ------------------------------------------------------------------- |
-| `:DashPaq[!]`                           | Open the dashboard; `!` force-closes and reopens with a fresh scan. |
-| `:DashPaq sync`                         | Raw online `vim.pack.update()` report; fetches every remote first.  |
-| `:DashPaq status`                       | Raw offline report; local refs only, no network.                    |
-| `:DashPaq stats`                        | Print the last raw update/same/error counters and check timestamps. |
-| `:DashPaq trace [plugin]`               | Show load status, load reason, load count, and trigger metadata.    |
-| `:DashPaq load <plugin>`                | Force-load one deferred plugin immediately.                         |
-| `:DashPaq lock info`                    | Show the `vim.pack` lockfile path, plugin count, and mtime.         |
-| `:DashPaq lock export\|import <path>`   | Copy the live `vim.pack` lockfile to, or overwrite it from, a path. |
-| `:DashPaq policy-rebuild [plugin]`      | Clear and recompute the cached tag/branch heuristic.                |
-| `:DashPaq toggle-dev <plugin>`          | Flip a dev-capable plugin between its upstream clone and dev checkout. |
+| Command                               | Purpose                                                                |
+| ------------------------------------- | ---------------------------------------------------------------------- |
+| `:DashPaq[!]`                         | Open the dashboard; `!` force-closes and reopens with a fresh scan.    |
+| `:DashPaq sync`                       | Raw online `vim.pack.update()` report; fetches every remote first.     |
+| `:DashPaq status`                     | Raw offline report; local refs only, no network.                       |
+| `:DashPaq stats`                      | Print the last raw update/same/error counters and check timestamps.    |
+| `:DashPaq trace [plugin]`             | Show load status, load reason, time loaded, and trigger metadata.      |
+| `:DashPaq load <plugin>`              | Force-load one deferred plugin immediately.                            |
+| `:DashPaq lock info`                  | Show the `vim.pack` lockfile path, plugin count, and mtime.            |
+| `:DashPaq lock export\|import <path>` | Copy the live `vim.pack` lockfile to, or overwrite it from, a path.    |
+| `:DashPaq policy-rebuild [plugin]`    | Clear and recompute the cached tag/branch heuristic.                   |
+| `:DashPaq toggle-dev <plugin>`        | Flip a dev-capable plugin between its upstream clone and dev checkout. |
 
 `opts.dashboard = false` leaves only `trace`, `load` and `toggle-dev`, which belong to the loader. Buffer filetypes (for
 session-save exclusions): `dashpaq`, `dashpaq-details`, `dashpaq-trace`. Dashboard keys:
@@ -142,6 +142,11 @@ See `:h dash-paq-dev` for the full base/worktree resolution order and `:h dash-p
 make test
 make lint
 ```
+
+## Releases
+
+Every push to `main` with `feat`/`fix`/`perf` or breaking commits publishes a tagged
+[GitHub release](https://github.com/kapral18/dash-paq.nvim/releases) with generated notes.
 
 ## License
 

@@ -32,7 +32,7 @@ end
 local counter = 0
 local function tmp_dir(label)
   counter = counter + 1
-  local uv = vim.uv or vim.loop
+  local uv = vim.uv
   local base = (os.getenv("TMPDIR") or "/tmp"):gsub("/+$", "")
   local dir = string.format("%s/dash-paq-fixtures/%d-%d-%s", base, uv.os_getpid(), counter, label or "d")
   vim.fn.mkdir(dir, "p")

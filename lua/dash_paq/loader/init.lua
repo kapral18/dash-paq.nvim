@@ -9,20 +9,12 @@ local triggers_mod = require("dash_paq.loader.triggers")
 local trace = require("dash_paq.loader.trace")
 local policy = require("dash_paq.policy")
 local modules_mod = require("dash_paq.loader.modules")
+local notify = require("dash_paq.notify")
+
+local notify_err = notify.err
+local notify_warn = notify.warn
 
 local AUGROUP = nil
-
-local function notify_err(msg)
-  vim.schedule(function()
-    vim.notify(msg, vim.log.levels.ERROR)
-  end)
-end
-
-local function notify_warn(msg)
-  vim.schedule(function()
-    vim.notify(msg, vim.log.levels.WARN)
-  end)
-end
 
 -- First insertion lands right after `stdpath("data")/site`, matching where
 -- `:packadd!` would put it (`:h packadd`).
@@ -274,6 +266,15 @@ local function resolve_dev_entries(entries, dev_cfg)
   return dev_plugin_paths, dev_capable
 end
 
+-- `owner/repo` expands to `…/repo.git`; a bare `vim.pack.add` of `…/repo`
+-- names the same remote.
+local function same_remote(a, b)
+  local function strip(src)
+    return (src:gsub("/+$", ""):gsub("%.git$", ""))
+  end
+  return strip(a) == strip(b)
+end
+
 local function load_version_policy()
   local loaded = policy.load_version_policy()
   if loaded then
@@ -384,7 +385,7 @@ function M.setup(config, dashboard)
 
   -- `declared` -> `registered` (deferred only) -> `loading` -> `loaded`; a disabled entry never leaves `declared`.
   for _, entry in ipairs(sorted) do
-    entry_state[entry.name] = { status = "declared", loaded_at = nil, loaded_by = nil, load_count = 0 }
+    entry_state[entry.name] = { status = "declared", loaded_at = nil, loaded_by = nil }
     if entry.enabled then
       local meta = {
         cmds = {},
@@ -579,7 +580,12 @@ function M.setup(config, dashboard)
     for _, p in ipairs(all_plugins) do
       local name = p.spec and p.spec.name
       if type(name) == "string" and name ~= "" then
-        if retain_pack_names[name] and spec_src[name] and p.spec.src and spec_src[name] ~= p.spec.src then
+        if
+          retain_pack_names[name]
+          and spec_src[name]
+          and p.spec.src
+          and not same_remote(spec_src[name], p.spec.src)
+        then
           to_reinstall[#to_reinstall + 1] = name
         end
       end
@@ -677,9 +683,9 @@ function M.setup(config, dashboard)
       for _, key in ipairs(meta.keys) do
         if key.rhs ~= nil then
           if key.ft then
-            triggers.apply_loaded_ft_key(entry.name, key)
+            triggers.apply_loaded_ft_key(key)
           else
-            triggers.apply_loaded_key(entry.name, key)
+            triggers.apply_loaded_key(key)
           end
         end
       end
@@ -699,7 +705,6 @@ function M.setup(config, dashboard)
     state.status = "loaded"
     state.loaded_at = os.date("%H:%M:%S")
     state.loaded_by = reason or "unknown"
-    state.load_count = (state.load_count or 0) + 1
     return true
   end
 
@@ -734,18 +739,14 @@ function M.setup(config, dashboard)
   local startup_entries = {}
 
   for _, entry in ipairs(sorted) do
-    if entry.enabled then
-      local meta = entry_meta[entry.name]
-        or { cmds = {}, events = {}, fts = {}, keys = {}, defer = false, priority = 50 }
-      if not meta.defer then
-        startup_entries[#startup_entries + 1] = entry
-      end
+    if entry.enabled and not entry_meta[entry.name].defer then
+      startup_entries[#startup_entries + 1] = entry
     end
   end
 
   table.sort(startup_entries, function(a, b)
-    local pa = (entry_meta[a.name] or {}).priority or 50
-    local pb = (entry_meta[b.name] or {}).priority or 50
+    local pa = entry_meta[a.name].priority
+    local pb = entry_meta[b.name].priority
     if pa ~= pb then
       return pa > pb
     end
@@ -761,7 +762,6 @@ function M.setup(config, dashboard)
   for _, entry in ipairs(sorted) do
     if entry.enabled and entry_state[entry.name].status ~= "loaded" then
       local meta = entry_meta[entry.name]
-        or { cmds = {}, events = {}, fts = {}, keys = {}, defer = false, priority = 50 }
       entry_state[entry.name].status = "registered"
 
       for _, key in ipairs(meta.keys) do

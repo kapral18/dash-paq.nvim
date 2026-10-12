@@ -1,6 +1,6 @@
 local state = require("dash_paq.dashboard.state")
 local analysis = require("dash_paq.dashboard.analysis")
-local notify = require("dash_paq.dashboard.report.notify")
+local notify = require("dash_paq.notify")
 
 local M = {}
 
@@ -158,7 +158,7 @@ local function collect_dashboard_rows()
   -- version can use them, asynchronously.
   local ok, plugins = pcall(vim.pack.get, nil, { info = false })
   if not ok then
-    notify.notify_err("Failed to read vim.pack plugins")
+    notify.err("Failed to read vim.pack plugins")
     return {}
   end
 
