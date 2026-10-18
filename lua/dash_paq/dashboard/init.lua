@@ -50,28 +50,14 @@ local function installed_plugin_complete(arglead, done)
   return commands.filter(names, arglead)
 end
 
-local function sync()
-  vim.pack.update()
+local function check_updates(offline)
+  vim.pack.update(nil, { offline = offline })
   local counts = report.refresh_pack_report_cache_from_report_buffer()
   if counts then
     state.pack_report_cache.last_check_counts = counts
   end
-  state.pack_report_cache.mode = "online"
-  state.pack_report_cache.last_online_at = os.time()
-  state.write_persisted_state()
-  if version_policy_enabled then
-    pcall(refresh_version_policy_if_needed)
-  end
-end
-
-local function status()
-  vim.pack.update(nil, { offline = true })
-  local counts = report.refresh_pack_report_cache_from_report_buffer()
-  if counts then
-    state.pack_report_cache.last_check_counts = counts
-  end
-  state.pack_report_cache.mode = "offline"
-  state.pack_report_cache.last_offline_at = os.time()
+  state.pack_report_cache.mode = offline and "offline" or "online"
+  state.pack_report_cache[offline and "last_offline_at" or "last_online_at"] = os.time()
   state.write_persisted_state()
   if version_policy_enabled then
     pcall(refresh_version_policy_if_needed)
@@ -249,8 +235,18 @@ function M.setup(config)
       ui.open(opts.bang)
     end,
   })
-  commands.register("sync", { usage = "sync", impl = sync })
-  commands.register("status", { usage = "status", impl = status })
+  commands.register("sync", {
+    usage = "sync",
+    impl = function()
+      check_updates(false)
+    end,
+  })
+  commands.register("status", {
+    usage = "status",
+    impl = function()
+      check_updates(true)
+    end,
+  })
   commands.register("stats", { usage = "stats", impl = stats })
   commands.register("lock", { usage = "lock info|export <path>|import <path>", impl = lock, complete = lock_complete })
   commands.register("policy-rebuild", {

@@ -35,6 +35,7 @@ local function parse_pack_report_buffer(bufnr)
         current_plugin = {
           status = current_group,
           pending_lines = {},
+          collect_pending = current_group == "error",
         }
         plugins[name] = current_plugin
         if counts[current_group] ~= nil then

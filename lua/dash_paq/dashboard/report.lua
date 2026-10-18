@@ -1,9 +1,4 @@
--- Facade over the report submodules. Callers require
--- `dash_paq.dashboard.report` and use the names re-exported here; the
--- concrete logic lives in the cohesive submodules under `report/`:
---   parser   - `nvim-pack://confirm` report buffer -> cache parsing
---   pipeline - per-plugin async fetch+status refresh
---   rows     - cache purge and dashboard row assembly
+-- Dashboard report parsing, refresh, and row assembly.
 local parser = require("dash_paq.dashboard.report.parser")
 local pipeline = require("dash_paq.dashboard.report.pipeline")
 local rows = require("dash_paq.dashboard.report.rows")

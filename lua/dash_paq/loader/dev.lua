@@ -120,14 +120,12 @@ local function candidate_label(entry)
   return entry.path
 end
 
--- Pure parser for `git worktree list --porcelain` output: one entry per
--- `worktree <path>` block (blocks are blank-line separated), with
--- `head`/`branch`/`bare` fields as present.
--- No filesystem or git I/O; callers filter by existence/bare-ness.
+-- Parse `git worktree list --porcelain -z`. NUL delimiters keep quoted or
+-- multiline paths intact; callers filter missing and bare worktrees.
 function M.parse_worktree_porcelain(output)
   local entries = {}
   local current = nil
-  for _, line in ipairs(vim.split(output or "", "\n", { trimempty = false })) do
+  for _, line in ipairs(vim.split(output or "", "\0", { plain = true, trimempty = false })) do
     if line == "" then
       current = nil
     elseif line:match("^worktree ") then
@@ -146,13 +144,13 @@ function M.parse_worktree_porcelain(output)
   return entries
 end
 
--- Runs `git worktree list --porcelain` against `git_dir` (with a clean git
+-- Runs `git worktree list --porcelain -z` against `git_dir` (with a clean git
 -- env) and returns the existing, non-bare worktrees (main worktree
 -- first, as git reports them), each with a normalized `path` and a
 -- ready `label` for `vim.ui.select`. Empty on any git failure, including a
 -- missing `git` binary.
 function M.list_worktrees(git_dir)
-  local result = run_git({ "worktree", "list", "--porcelain" }, git_dir)
+  local result = run_git({ "worktree", "list", "--porcelain", "-z" }, git_dir)
   if not result or result.code ~= 0 then
     return {}
   end

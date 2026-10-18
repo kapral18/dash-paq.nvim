@@ -115,6 +115,16 @@ t.describe("normalizing keys specs (normalize_key_specs)", function()
     local normalized = spec_mod.normalize_key_specs({ { "<leader>p", "<Plug>(thing)" } }, {})
     t.assert.equals(true, normalized[1].opts.remap)
   end)
+
+  t.it("SHOULD apply the same remap default to a named rhs", function()
+    local normalized = spec_mod.normalize_key_specs({ { lhs = "<leader>p", rhs = "<Plug>(thing)" } }, {})
+    t.assert.equals(true, normalized[1].opts.remap)
+  end)
+
+  t.it("SHOULD preserve an explicit remap override for a named rhs", function()
+    local normalized = spec_mod.normalize_key_specs({ { lhs = "<leader>p", rhs = "<Plug>(thing)", remap = false } }, {})
+    t.assert.equals(false, normalized[1].opts.remap)
+  end)
 end)
 
 t.describe("normalizing a declared version (normalize_pack_version)", function()
@@ -383,6 +393,24 @@ t.describe("a spec's string `dev` field sets entry.dev_base (per-plugin dev base
       { "owner/plug", name = "plug", dev = true },
     }, { dev = { path = "~/projects" } })
     t.assert.is_nil(entries.plug.dev_base)
+  end)
+end)
+
+t.describe("WHEN merged specs match dev.patterns", function()
+  t.it("SHOULD keep an explicit dev=false when a later spec omits dev", function()
+    local entries = spec_mod.flatten_specs({}, {
+      { "owner/plug", dev = false },
+      { "owner/plug", opts = {} },
+    }, { dev = { path = "/tmp/projects", patterns = { "^plug$" } } })
+    t.assert.equals(false, entries.plug.is_dev)
+  end)
+
+  t.it("SHOULD let a later explicit dev=true enable development again", function()
+    local entries = spec_mod.flatten_specs({}, {
+      { "owner/plug", dev = false },
+      { "owner/plug", dev = true },
+    }, { dev = { path = "/tmp/projects", patterns = { "^plug$" } } })
+    t.assert.equals(true, entries.plug.is_dev)
   end)
 end)
 

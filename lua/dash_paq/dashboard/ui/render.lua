@@ -9,21 +9,13 @@ local dashboard_ns = vim.api.nvim_create_namespace("dash_paq.dashboard")
 function M.ensure_highlights()
   local set_hl = vim.api.nvim_set_hl
   set_hl(0, "DashPaqTitle", { default = true, link = "Title" })
-  -- FILTERED banner: warning-styled so a narrowed list is unmistakable.
   set_hl(0, "DashPaqFiltered", { default = true, link = "WarningMsg" })
-  -- Live refresh progress line: info-colored so it reads as active, not chrome.
   set_hl(0, "DashPaqProgress", { default = true, link = "DiagnosticInfo" })
-  -- Key-reference (help) line: a distinct accent so it does not blend into the
-  -- grey meta lines as one undifferentiated blob.
   set_hl(0, "DashPaqKey", { default = true, link = "Function" })
   set_hl(0, "DashPaqMeta", { default = true, link = "Comment" })
-  -- Field label (the `key` of a key:value pair): dim, so values stand out.
   set_hl(0, "DashPaqLabel", { default = true, link = "Comment" })
-  -- Field value: normal foreground so each value reads against its dim label.
   set_hl(0, "DashPaqValue", { default = true, link = "Normal" })
-  -- Inline item separator (the vertical bar between fields): faint chrome.
   set_hl(0, "DashPaqBar", { default = true, link = "NonText" })
-  -- Section divider rule: faint chrome, same family as the bar.
   set_hl(0, "DashPaqRule", { default = true, link = "NonText" })
   set_hl(0, "DashPaqHeader", { default = true, link = "Identifier" })
   set_hl(0, "DashPaqStatusUpdate", { default = true, link = "DiagnosticInfo" })
@@ -38,94 +30,40 @@ function M.ensure_highlights()
   set_hl(0, "DashPaqRiskSafe", { default = true, link = "DiffAdd" })
   set_hl(0, "DashPaqRiskUnknown", { default = true, link = "Comment" })
   set_hl(0, "DashPaqLink", { default = true, link = "Underlined" })
-  -- Checkbox only, no bg — avoid Visual (blue) and IncSearch/DiagnosticWarn
-  -- (breaking orange).
   set_hl(0, "DashPaqSelected", { default = true, link = "Special" })
 end
 
--- last-result section as labeled key:value segments (label dim, value accented).
-local function raw_status_segments()
-  local raw = state.pack_report_cache.last_check_counts
-  local segs
-  if type(raw) == "table" then
-    segs = {
-      {
-        key = "update",
-        value = tostring(tonumber(raw.update) or 0),
-        key_hl = "DashPaqLabel",
-        value_hl = "DashPaqStatusUpdate",
-      },
-      {
-        key = "same",
-        value = tostring(tonumber(raw.same) or 0),
-        key_hl = "DashPaqLabel",
-        value_hl = "DashPaqStatusSame",
-      },
-      {
-        key = "error",
-        value = tostring(tonumber(raw.error) or 0),
-        key_hl = "DashPaqLabel",
-        value_hl = "DashPaqStatusError",
-      },
-    }
-  else
-    segs = { { text = "last-result: n/a (run r)", hl = "DashPaqMeta" } }
-  end
-  segs[#segs + 1] = {
-    key = "online",
-    value = state.format_cache_stamp(state.pack_report_cache.last_online_at),
-    key_hl = "DashPaqLabel",
-    value_hl = "DashPaqValue",
-  }
-  segs[#segs + 1] = {
-    key = "offline",
-    value = state.format_cache_stamp(state.pack_report_cache.last_offline_at),
-    key_hl = "DashPaqLabel",
-    value_hl = "DashPaqValue",
-  }
-  return segs
-end
-
--- Live progress for an in-flight refresh, on its own dedicated header line so it
--- stays visible in a narrow pane instead of being clipped off the right edge.
 local function progress_segments(ctx)
   local progress = ctx.online_check_progress or {}
-  local detail = "status"
-  if (tonumber(progress.total) or 0) > 0 then
-    detail = string.format("status %d/%d", tonumber(progress.done) or 0, progress.total)
-  end
-  local marker = ctx.use_nerd_font and " " or ">>"
+  local total = progress.total or 0
+  local done = math.max(0, total - vim.tbl_count(ctx.refreshing or {}))
   return {
     {
-      key = marker .. " checking updates",
-      value = detail,
+      key = progress.label or "Refreshing",
+      value = string.format("%d/%d", done, total),
       key_hl = "DashPaqProgress",
       value_hl = "DashPaqValue",
     },
   }
 end
 
--- Counts section: one segment per status, the COUNT colored by that status group
--- so each kind reads in its own tone even within the same line. Nerd-font uses
--- the status glyph as the label (space-separated from the count); ASCII uses a
--- short word label.
-local function stats_segments(ctx, counts)
-  local function seg(icon_key, ascii, count, value_hl)
-    local label = ctx.use_nerd_font and ctx.icons[icon_key] or ascii
-    local sep = ctx.use_nerd_font and " " or ":"
-    return { key = label, value = tostring(count), sep = sep, key_hl = "DashPaqLabel", value_hl = value_hl }
+local function stats_segments(counts)
+  local segments = { { text = "All:", hl = "DashPaqMeta" } }
+  for _, status in ipairs({ "update", "same", "error", "unknown", "orphan", "drift", "risky", "local" }) do
+    segments[#segments + 1] = {
+      key = status,
+      value = tostring(counts[status]),
+      key_hl = "DashPaqLabel",
+      value_hl = M.status_hl[status],
+    }
   end
-  return {
-    seg("update", "upd", counts.update, "DashPaqStatusUpdate"),
-    seg("same", "same", counts.same, "DashPaqStatusSame"),
-    seg("error", "err", counts.error, "DashPaqStatusError"),
-    seg("unknown", "unk", counts.unknown, "DashPaqStatusUnknown"),
-    seg("orphan", "orph", counts.orphan, "DashPaqStatusOrphan"),
-    seg("drift", "drift", counts.drift, "DashPaqStatusDrift"),
-    seg("risky", "risky", counts.risky, "DashPaqStatusRisky"),
-    seg("local", "local", counts["local"], "DashPaqStatusLocal"),
-    seg("risk_break", "brk", counts.breaking, "DashPaqRiskBreak"),
+  segments[#segments + 1] = {
+    key = "breaking signals",
+    value = tostring(counts.breaking),
+    key_hl = "DashPaqLabel",
+    value_hl = "DashPaqRiskBreak",
   }
+  return segments
 end
 
 local function join_cells(cells)
@@ -219,12 +157,6 @@ local function apply_row_highlights(ctx, line_no, row, ranges)
   end
 end
 
--- The vertical bar between inline items within a header section. Nerd-font
--- uses box-drawing; ASCII falls back to a pipe.
-local function section_bar(use_nerd_font)
-  return use_nerd_font and "│" or "|"
-end
-
 -- Render one segment to its display text and the relative byte spans coloring
 -- its parts. A segment is one of:
 --   { text = "...", hl = "Group" }                       -- a plain item
@@ -251,11 +183,10 @@ end
 
 -- Lays out segments (see render_segment) into lines no wider than `width`,
 -- joined by bar separators; wraps at a segment boundary so a `key:value` item
--- is never split mid-token. A segment wider than `width` gets its own line,
--- clipped only by the window. Returns `{ lines = {string,...}, spans = { [i] =
--- { {start_col,end_col,hl}, ... } } }` (byte offsets, 0-based start col).
+-- is never split mid-token. Oversized segments end with an ellipsis.
+-- Returns lines and their highlight spans (0-based byte offsets).
 local function layout_segments(segments, width, bar_hl, use_nerd_font)
-  local bar = section_bar(use_nerd_font)
+  local bar = use_nerd_font and "│" or "|"
   local joiner = " " .. bar .. " "
   local out_lines = {}
   local out_spans = {}
@@ -278,6 +209,7 @@ local function layout_segments(segments, width, bar_hl, use_nerd_font)
 
   for _, seg in ipairs(segments) do
     local text, spans = render_segment(seg)
+    text = fmt.truncate_display(text, width)
     if text ~= "" then
       if cur_text == "" then
         add_spans_at(0, spans)
@@ -304,14 +236,6 @@ local function layout_segments(segments, width, bar_hl, use_nerd_font)
   return { lines = out_lines, spans = out_spans }
 end
 
--- True when the current filter mode and/or search text is hiding rows, i.e. the
--- visible set is a strict subset of the loaded set. Drives the FILTERED banner.
-local function filter_is_active(ctx)
-  return ctx.filter_mode ~= "all" or (type(ctx.search_text) == "string" and ctx.search_text ~= "")
-end
-
--- One human-readable description of every active narrowing facet, e.g.
--- "filter:updates, search:'treesitter'". Returns nil when nothing is narrowing.
 local function active_filter_desc(ctx)
   local parts = {}
   if ctx.filter_mode ~= "all" then
@@ -326,142 +250,80 @@ local function active_filter_desc(ctx)
   return table.concat(parts, ", ")
 end
 
--- Build the keymap-help section as key:value segments. Each entry is one
--- `<keys> <action>` item: the keys take an accent color, the action stays dim,
--- and items are bar-separated like every other section.
 local function help_segments(ctx)
   local function item(keys, action)
     return { key = keys, value = action, sep = " ", key_hl = "DashPaqKey", value_hl = "DashPaqMeta" }
   end
   return {
-    item("r", "offline-status"),
-    item("R", "online-refresh"),
-    item("<CR>/u/U", "update-pending"),
-    item("C", "clean-orphans"),
-    item("V", "heal-drift"),
-    { key = "f filter", value = ctx.filter_mode, key_hl = "DashPaqKey", value_hl = "DashPaqValue" },
-    { key = "s sort", value = ctx.sort_mode, key_hl = "DashPaqKey", value_hl = "DashPaqValue" },
-    { key = "/ search", value = ctx.search_text or "-", key_hl = "DashPaqKey", value_hl = "DashPaqValue" },
-    item("a", "sel-all"),
-    item("o", "link"),
+    item("r/R", "refresh offline/online"),
+    item("u/U", "update selected/visible"),
+    item("<Space>", "select"),
+    item("/", "search"),
+    item("f", "filter:" .. ctx.filter_mode),
+    item("s", "sort:" .. ctx.sort_mode),
     item("K", "details"),
-    item("?", "help"),
+    item("?", "keys"),
+    item("q", "close"),
   }
 end
 
--- Variable-height, section-structured header: title, optional FILTERED banner,
--- counts, optional live progress, last-result, and key-help sections, each
--- laid out as bar-separated `key:value` segments wrapped to the window width
--- and divided by thin rules. Returns `lines` plus parallel `line_spans`
--- (`line_spans[i] = { {start_col,end_col,hl}, ... }`) so render() and
--- render_header() highlight the exact same region without a hardcoded line count.
+-- Header spans use byte offsets; widths use display cells, as do data rows.
 local function build_header_lines(ctx)
-  local counts = rows.summary_counts(ctx)
-  local sel_visible = rows.selected_count(ctx, true)
-  local sel_total = rows.selected_count(ctx, false)
   local visible_count = #rows.visible(ctx)
-  local total_count = #(ctx.rows or {})
-  local title = ctx.use_nerd_font and "󰒲  dash-paq dashboard" or "dash-paq dashboard"
+  local selected = rows.selected_count(ctx, false)
+  local hidden_selected = selected - rows.selected_count(ctx, true)
   local win_width = (ctx.winid and vim.api.nvim_win_is_valid(ctx.winid)) and vim.api.nvim_win_get_width(ctx.winid)
     or vim.o.columns
-  local row_width = math.max(80, win_width - 2)
-  local full_rule = string.rep(ctx.use_nerd_font and "─" or "-", row_width)
-  -- A lighter mid-rule between metadata sections (distinct from the heavy table
-  -- separators below the column header).
-  local section_rule = string.rep(ctx.use_nerd_font and "╌" or "·", row_width)
-
-  local lines = {}
-  local line_spans = {}
+  local width = math.max(1, win_width)
+  local lines, line_spans = {}, {}
 
   local function push_raw(text, hl)
     lines[#lines + 1] = text
-    line_spans[#line_spans + 1] = { { start_col = 0, end_col = #text, hl = hl } }
+    line_spans[#lines] = { { start_col = 0, end_col = #text, hl = hl } }
   end
 
-  -- Lay out one section's segments (bar-separated, wrapped) and append the
-  -- resulting lines/spans. `push_rule()` is called explicitly only between the
-  -- larger blocks (status vs help) so the header doesn't carry a rule between
-  -- every section.
   local function push_section(segments)
-    local laid = layout_segments(segments, row_width, "DashPaqBar", ctx.use_nerd_font)
-    for i, l in ipairs(laid.lines) do
-      lines[#lines + 1] = l
-      line_spans[#line_spans + 1] = laid.spans[i]
+    if #segments == 0 then
+      return
     end
+    local laid = layout_segments(segments, width, "DashPaqBar", ctx.use_nerd_font)
+    vim.list_extend(lines, laid.lines)
+    vim.list_extend(line_spans, laid.spans)
   end
 
-  local function push_rule()
-    push_raw(section_rule, "DashPaqRule")
-  end
-
-  -- Title section: the name plus mode/result/applied/selected as colored fields.
   push_section({
-    { text = title, hl = "DashPaqTitle" },
-    {
-      key = "mode",
-      value = state.pack_report_cache.mode or "unknown",
-      key_hl = "DashPaqLabel",
-      value_hl = "DashPaqValue",
-    },
-    {
-      key = "result",
-      value = state.format_cache_stamp(state.pack_report_cache.updated_at),
-      key_hl = "DashPaqLabel",
-      value_hl = "DashPaqValue",
-    },
-    {
-      key = "applied",
-      value = string.format(
-        "%s (%d)",
-        state.format_cache_stamp(state.pack_report_cache.last_applied_at),
-        tonumber(state.pack_report_cache.last_applied_count) or 0
-      ),
-      key_hl = "DashPaqLabel",
-      value_hl = "DashPaqValue",
-    },
+    { text = string.format("%d of %d plugins", visible_count, #ctx.rows), hl = "DashPaqTitle" },
     {
       key = "selected",
-      value = string.format("%d/%d", sel_visible, sel_total),
+      value = tostring(selected) .. (hidden_selected > 0 and string.format(" (%d hidden)", hidden_selected) or ""),
+      key_hl = "DashPaqLabel",
+      value_hl = "DashPaqValue",
+    },
+    {
+      key = "checked " .. (state.pack_report_cache.mode or "unknown"),
+      value = state.format_cache_stamp(state.pack_report_cache.updated_at),
       key_hl = "DashPaqLabel",
       value_hl = "DashPaqValue",
     },
   })
 
-  -- Unmistakable FILTERED banner when rows are hidden, so a narrowed list never
-  -- looks like "only N plugins exist".
-  if filter_is_active(ctx) then
-    local marker = ctx.use_nerd_font and " FILTERED" or "[!] FILTERED"
+  local filter = active_filter_desc(ctx)
+  if filter then
     push_section({
-      { text = marker, hl = "DashPaqFiltered" },
-      {
-        key = "showing",
-        value = string.format("%d of %d", visible_count, total_count),
-        key_hl = "DashPaqLabel",
-        value_hl = "DashPaqFiltered",
-      },
-      { text = active_filter_desc(ctx) or "-", hl = "DashPaqValue" },
-      { text = "f cycles filter, c clears search", hl = "DashPaqMeta" },
+      { text = filter, hl = "DashPaqFiltered" },
+      { text = "f changes filter; c clears search", hl = "DashPaqMeta" },
     })
   end
-
-  push_section(stats_segments(ctx, counts))
-  push_section(raw_status_segments())
-
-  -- Live refresh progress sits on its own line BELOW the whole status block
-  -- (after both count rows) so it never splits the icon-counts row from the
-  -- labeled-counts row; it stays just above the status->help rule.
+  -- Counts cover all plugins; the first line names the visible subset.
+  push_section(stats_segments(rows.summary_counts(ctx)))
   if ctx.online_check_running then
     push_section(progress_segments(ctx))
   end
-
-  -- One rule divides the status block (state) from the help block (actions).
-  push_rule()
   push_section(help_segments(ctx))
 
-  -- Heavy table frame: column header bracketed by full-width rules. Kept as
-  -- single lines (not wrapped) so they align with the horizontally-scrolling
-  -- data rows below.
-  push_raw(full_rule, "DashPaqMeta")
+  -- The table keeps fixed columns and can scroll horizontally.
+  local rule = string.rep(ctx.use_nerd_font and "─" or "-", width)
+  push_raw(rule, "DashPaqRule")
   push_raw(
     table.concat({
       fmt.pad_cell("SEL", 3),
@@ -473,8 +335,7 @@ local function build_header_lines(ctx)
     }, " "),
     "DashPaqHeader"
   )
-  push_raw(full_rule, "DashPaqMeta")
-
+  push_raw(rule, "DashPaqRule")
   return lines, line_spans
 end
 

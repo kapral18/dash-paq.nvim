@@ -30,9 +30,7 @@ local function stop_spinner(ctx)
   end
 end
 
--- Animate the inline spinner: advance the frame and rewrite only the rows that
--- are still in-flight (plus the header status line for live progress), so the
--- animation never triggers a full-table redraw.
+-- Redraw only pending rows and progress. Dispose the timer when the buffer closes.
 local function start_spinner(ctx)
   stop_spinner(ctx)
   local timer = vim.uv.new_timer()
@@ -149,14 +147,8 @@ local function apply_pipeline_result(ctx, result, counts)
   view.render_row(ctx, name)
 end
 
--- Resolve the set of plugin names a row op targets, mark them in-flight, and
--- return that resolved name list. `names` nil means every currently *visible*
--- row (used by the r/R refresh, which honors the active filter): the returned
--- list is then fed to the pipeline so the in-flight set, the progress
--- denominator, and the plugins refreshed are one and the same population.
--- `dev` rows are synthetic (never in `vim.pack.get`): including one in the
--- pipeline's `names` filter makes `vim.pack.get(names)` error for the whole
--- batch, zeroing out every row's refresh, not just the dev one's.
+-- Refresh targets are explicit names or all visible rows. Exclude synthetic dev
+-- rows: passing one to vim.pack.get(names) rejects the entire batch.
 local function mark_targets(ctx, names)
   ctx.refreshing = {}
   local resolved = {}
@@ -190,32 +182,17 @@ local function remove_rows(ctx, names)
   end
 end
 
--- Unified per-row operation engine. Every long-running dashboard mode routes
--- through here so the experience is identical: target rows immediately show an
--- inline spinner, an optional bulk mutation runs, then each row resolves
--- independently (flipping to its new status, or vanishing for removals) with a
--- single full re-render (re-sort + cursor + notify) at the very end.
---
+-- Refresh or mutate target rows, keeping their positions stable until completion.
 -- spec fields:
---   names         list of target names, or nil for "all visible" (r/R)
---   online        whether the per-row status phase fetches before comparing
---   apply         optional fn() run once before the status phase (bulk mutate
---                 via vim.pack.update/del); blocking is fine, it is scheduled
---                 after the spinner paints
---   remove_on_done  true to delete target rows instead of re-evaluating them
---   on_finalize   optional fn(counts) run inside finalize, before the final
---                 render, for op-specific cache stamping / side effects
---   done_notify   optional fn(counts) run after the final render for the
---                 op-specific completion notice
---   apply_rows    optional fn(names) -> ok, err run for up to `apply_batch_size`
---                 queued plugins whose fetch/status resolved as "update",
---                 BEFORE their rows flip. Used by the update op to do a fast
---                 local (offline) checkout so the network fetch stays async
---                 (no UI freeze). On success every row of the batch is treated
---                 as up-to-date, on failure (or a raise) as an error row.
---   apply_batch_size  max rows per `apply_rows` call (default 1). One batch is
---                 one blocking call: batching amortizes its fixed cost (git
---                 spawn, lockfile, redraws) over several plugins.
+--   names: nil means all visible rows; dev rows are excluded
+--   label: action shown with the completed-row count
+--   online: fetch before resolving status
+--   apply: scheduled bulk mutation before status; raises abort the operation
+--   remove_on_done: remove rows instead of resolving their status
+--   apply_rows(names): blocking checkout of fetched updates; returns ok, err
+--   apply_batch_size: maximum rows per checkout call (default 1)
+--   on_finalize(counts): cache updates before final rendering
+--   done_notify(counts): completion hook after final rendering
 function M.run_row_op(ctx, spec)
   spec = spec or {}
   -- A row op is already in flight: the visible spinners already convey "busy",
@@ -250,7 +227,7 @@ function M.run_row_op(ctx, spec)
     ctx.rows = report.collect_dashboard_rows()
     target_names = mark_targets(ctx, spec.names)
     total = vim.tbl_count(ctx.refreshing)
-    ctx.online_check_progress = { done = 0, total = total }
+    ctx.online_check_progress = { total = total, label = spec.label or "Refreshing" }
     view.render(ctx)
     start_spinner(ctx)
     local current = rows.row_at_cursor(ctx)
@@ -380,13 +357,11 @@ function M.run_row_op(ctx, spec)
       drain_step()
     end
 
-    report.run_refresh_pipeline(target_names, spec.online == true, function(result, done_count)
+    report.run_refresh_pipeline(target_names, spec.online == true, function(result)
       if finished then
         return
       end
-      -- For the update op: now that this plugin's remote is fetched, perform a
-      -- fast local checkout to the new revision, then present it as up-to-date.
-      -- The slow fetch already happened asynchronously, so this stays snappy.
+      -- Keep fetched rows pending until their checkout finishes.
       if spec.apply_rows and result.status == "update" then
         apply_queue[#apply_queue + 1] = result
         drain_queue()
@@ -397,7 +372,6 @@ function M.run_row_op(ctx, spec)
       if finished then
         return
       end
-      ctx.online_check_progress = { done = done_count, total = total }
       view.render_header(ctx)
     end, function()
       if finished then
@@ -446,6 +420,7 @@ end
 function M.refresh(ctx, online)
   M.run_row_op(ctx, {
     online = online,
+    label = online and "Refreshing online" or "Refreshing offline",
     on_finalize = function(counts)
       local cache = state.pack_report_cache
       cache.last_check_counts = counts

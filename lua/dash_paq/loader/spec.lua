@@ -81,6 +81,7 @@ function M.eval_gate(value, default)
 end
 
 function M.key_opts_from_spec(spec)
+  local rhs = spec.rhs or spec[2]
   local opts = {
     desc = spec.desc,
     expr = spec.expr,
@@ -92,7 +93,7 @@ function M.key_opts_from_spec(spec)
     opts.noremap = spec.noremap
   elseif spec.remap ~= nil then
     opts.remap = spec.remap
-  elseif type(spec[2]) == "string" and spec[2]:match("^<Plug>") then
+  elseif type(rhs) == "string" and rhs:match("^<Plug>") then
     -- <Plug> mappings usually need remap semantics.
     opts.remap = true
   end
@@ -260,8 +261,8 @@ function M.flatten_specs(module_names, direct_specs, opts)
       else
         entry.dev_base = nil
       end
-    elseif dev_cfg and M.is_dev_entry(name, nil, dev_cfg) then
-      entry.is_dev = true
+    elseif #entry.specs == 1 then
+      entry.is_dev = M.is_dev_entry(name, nil, dev_cfg)
     end
 
     if not M.eval_gate(spec.enabled, true) or not M.eval_gate(spec.cond, true) then

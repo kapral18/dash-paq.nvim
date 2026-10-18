@@ -23,11 +23,9 @@ CONTENTS                                                   *dash-paq-contents*
 ==============================================================================
 1. Introduction                                        *dash-paq-introduction*
 
-Neovim >= 0.12 ships |vim.pack| — install, update, a lockfile — but no
-lazy-loading spec layer, version policy, or update overview.
-dash-paq.nvim adds those three:
+dash-paq.nvim adds lazy loading and an update dashboard to |vim.pack|:
 
-  - a lazy.nvim-shaped spec layer (cmd/event/ft/keys, dependencies,
+  - plugin specs (cmd/event/ft/keys, dependencies,
     init/config/opts, build hooks) resolving to plain |vim.pack.add()|
     calls;
   - a tag-vs-branch version policy: release tags or default branch, per
@@ -35,7 +33,7 @@ dash-paq.nvim adds those three:
   - an interactive dashboard (|:DashPaq|) adding drift, orphan,
     risky-pin, and breaking-change detection over vim.pack's own report.
 
-Installs/updates/deletes and the lockfile stay |vim.pack|'s own.
+|vim.pack| handles installation, updates, deletion, and its lockfile.
 
 ==============================================================================
 2. Requirements                                        *dash-paq-requirements*
@@ -85,7 +83,7 @@ triggered: `plugin/**`, `config`/`opts`, `after/plugin/**`.
     or `-u NONE`, skips `plugin/**` sourcing like a plain
     |vim.pack.add()|: startup plugins still land on 'runtimepath', run
     `config`/`opts`.
-  - When a declared plugin's `src` changes between two `setup()` runs,
+  - When a declared plugin's `src` changes between Neovim sessions,
     `setup()` deletes the old clone and re-clones it from the new `src`.
 
 ==============================================================================
@@ -120,9 +118,8 @@ Supported fields:
                    `scheme://` URL, `git@...`, or `gh:...`, verbatim.
   `name`           Explicit name; else `src`'s basename minus `.git`, or
                    `dir`'s basename.
-  `dir`            Local directory onto 'runtimepath' (load order after
-                   the built-in `site` pack dir) instead of an installed
-                   `vim.pack` clone.
+  `dir`            Local directory onto 'runtimepath' when no `src` is
+                   given (load order after the built-in `site` pack dir).
   `dev`            `true` loads from `dev.path .. "/" .. name` when
                    present; a string sets a per-plugin base dir instead;
                    see |dash-paq-dev|.
@@ -130,6 +127,8 @@ Supported fields:
                    `^`/`~`/`>`/`<`/`=` range = greatest matching tag;
                    other string = literal tag/branch/commit; omitted =
                    version policy decides (|dash-paq-version-policy|).
+                   Across merged specs, `version = false` overrides
+                   pins from other specs; otherwise the last pin wins.
   `commit`/`tag`/`branch`
                    Explicit pin; priority over `version`.
   `enabled`/`cond` Boolean or function; any false among merged specs
@@ -172,7 +171,7 @@ Supported fields:
   `ft`             String or list of filetypes, deferring load.
   `lazy`           `false` loads at startup even when triggers are set;
                    `true` keeps it deferred with no trigger (loadable via
-                   `:DashPaq load` or as a dependency).
+                   `require()`, `:DashPaq load`, or as a dependency).
   `priority`       Load order among non-deferred entries (default 50;
                    higher first; ties keep spec order). Values below 50
                    are clamped to 50.
@@ -261,12 +260,13 @@ dashboard and reopens it with a fresh scan. `!` is rejected on every
 other subcommand.
 
 :DashPaq sync                                                  *:DashPaq-sync*
-Raw online `vim.pack.update()` report: fetches every remote, refreshes
-the cached report/version policy.
+Fetch remotes and open `vim.pack.update()`'s update confirmation.
+Refreshes the cached report/version policy.
 
 :DashPaq status                                              *:DashPaq-status*
-Raw offline report (`vim.pack.update(nil, { offline = true })`): local
-refs only, no network.
+Open the same update confirmation using local refs without fetching
+(`vim.pack.update(nil, { offline = true })`). Confirming updates still
+changes checkouts and the lockfile.
 
 :DashPaq stats                                                *:DashPaq-stats*
 Print last raw update/same/error counters, check timestamps.
@@ -348,8 +348,8 @@ Buffer-local to the dashboard window:
 `<CR>`/`u`/`U` fetch in the background, then check out each fetched
 plugin with `vim.pack.update`, which blocks input while it runs. While
 the cursor keeps changing lines, queued checkouts wait until it has
-stayed on one line for 300 ms. The progress counter counts fetches, so
-rows can still spin after it reaches the total.
+stayed on one line for 300 ms. The progress counter counts completed rows,
+including checkouts.
 
 Filter/search/sort state persists across sessions (see
 |dash-paq-state|); a saved `selected` filter reopens as `all`.
@@ -369,6 +369,12 @@ Row status values: `update`/`same`/`error`/`unknown`, `orphan`
 declared version), `risky` (`version = "*"` would pick a non-release
 tag over the latest real release), and `local` (a |dash-paq-dev|
 override, never touched by `vim.pack`).
+
+Status counts cover all plugins; the header shows how many are visible.
+The `RK` column shows `!` for a possible breaking change, `+` when no
+breaking signal was detected, and `-` when unknown or not assessed.
+Signals come from versions and commit messages, not compatibility tests.
+Use |:DashPaq-stats| for the last check counts and check/apply times.
 
 ==============================================================================
 9. Version policy                                    *dash-paq-version-policy*
@@ -418,8 +424,8 @@ two-part tags like `nvim-0.6` never beat a real `vX.Y.Z` tag.
     }
 <
 An entry is a dev entry when `dev = true`, `dev` is a non-empty string, or
-its name matches `dev.patterns`. `dev = false` opts out even when the name
-matches `dev.patterns`.
+its name matches `dev.patterns`. The last explicit `dev` value wins across
+merged specs; `dev = false` opts out even when the name matches a pattern.
 
 Base dir: a string `dev` is that path (`~` expanded), overriding
 `dev.path .. "/" .. name` for that one plugin; `dev = true`/a pattern match
@@ -461,8 +467,9 @@ plugin whose spec dropped `src`, or an existing directory that no longer
 matches the base's candidates (e.g. after the spec's `dev` base changed) is
 ignored with a warning and falls back to the default above.
 
-|:DashPaq-toggle-dev| does the same flip as a command: upstream <-> the default
-dev checkout. `L` stays the way to pick a specific worktree.
+|:DashPaq-toggle-dev| switches upstream <-> the default dev checkout.
+`L` can pick a specific worktree. Both use the saved choice, so repeating
+a switch before restarting changes the pending choice.
 
 A switch to upstream is refused with a warning, and nothing is saved, when
 the installed clone is not a plugin directory or has none of the top-level

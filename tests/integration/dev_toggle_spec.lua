@@ -384,4 +384,30 @@ t.describe("the dashboard buffer's dev-toggle key", function()
   end)
 end)
 
+t.describe("WHEN a dev switch is saved without restarting", function()
+  t.it("SHOULD let the dashboard reverse a choice made by the command", function()
+    local operations = require("dash_paq.dashboard.ui.operations")
+    local dev_command = require("dash_paq.loader.dev_command")
+    dev.save_choices({ badpathplug = "upstream" })
+    dev_command.toggle(state.dev_capable_cache, "badpathplug", {
+      confirm = function()
+        return 2
+      end,
+    })
+    t.assert.equals(realpath(badpath_dev_dir), dev.load_choices().badpathplug)
+    operations.toggle_dev({ name = "badpathplug" }, {
+      confirm = function()
+        return 2
+      end,
+    })
+    t.assert.equals("upstream", dev.load_choices().badpathplug)
+    operations.toggle_dev({ name = "badpathplug" }, {
+      confirm = function()
+        return 2
+      end,
+    })
+    t.assert.equals(realpath(badpath_dev_dir), dev.load_choices().badpathplug)
+  end)
+end)
+
 t.finish()

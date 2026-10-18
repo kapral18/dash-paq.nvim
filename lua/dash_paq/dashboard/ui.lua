@@ -32,8 +32,10 @@ local function open_popup_window(ctx)
   local min_height = tonumber(cfg.min_height) or defaults.min_height
   local margin = math.max(2, tonumber(cfg.margin) or defaults.margin)
 
-  local width = math.min(math.max(min_width, math.floor(vim.o.columns * width_ratio)), vim.o.columns - margin)
-  local height = math.min(math.max(min_height, math.floor(total_lines * height_ratio)), total_lines - margin)
+  local width =
+    math.max(1, math.min(math.max(min_width, math.floor(vim.o.columns * width_ratio)), vim.o.columns - margin))
+  local height =
+    math.max(1, math.min(math.max(min_height, math.floor(total_lines * height_ratio)), total_lines - margin))
   local row = math.floor((total_lines - height) / 2)
   local col = math.floor((vim.o.columns - width) / 2)
 
@@ -105,8 +107,7 @@ function M.open(force_scan)
     ctx.rows = report.collect_dashboard_rows()
     view.render(ctx)
   end)
-  -- Always start with a fresh online status check on open: each row arrives
-  -- independently via the unified per-row pipeline (same as pressing `R`).
+  -- Opening uses the same refresh path as R.
   if state.dashboard_config.refresh_on_open ~= false then
     refresh.refresh(ctx, true)
   end

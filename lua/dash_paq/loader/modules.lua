@@ -45,12 +45,8 @@ local function is_eligible(entry, state)
   return entry ~= nil and entry.enabled and state ~= nil and state.status ~= "loaded" and state.status ~= "loading"
 end
 
--- Built lazily on the first `require()` miss (never scanned at startup):
--- one non-recursive `fs_scandir` per enabled, not-yet-loaded entry --
--- including one mid-load, whose dependencies may require it (see
--- `searcher`). `ctx.sorted` (not `pairs(ctx.entries)`) keeps the
--- "first entry wins" tie-break (two entries providing the same top-level
--- name) deterministic.
+-- Scan on the first require miss, including entries mid-load whose dependencies
+-- may require them. The first entry in dependency order owns a shared module name.
 local function build_top_map(ctx)
   local map = {}
   for _, entry in ipairs(ctx.sorted) do
@@ -88,13 +84,8 @@ local function loading_entry_loader(entry, modname)
   return chunk
 end
 
--- `package.loaders` searcher. On a miss owned by a still-eligible entry,
--- loads it and returns a plain message -- not a loader function -- so
--- `require()` keeps walking the remaining searchers, which now find the
--- module on rtp themselves (see `M.install` for exactly where this runs
--- relative to Neovim's own rtp searcher). On a miss owned by an entry
--- that is mid-load, returns a loader from its root (see
--- `loading_entry_loader`) instead of loading it again.
+-- Load the owning entry, then let Neovim resolve the module from runtimepath.
+-- A dependency can require its parent mid-load; serve that module directly.
 local function searcher(modname)
   if not current then
     return nil
@@ -138,14 +129,8 @@ function M.install(opts)
     load_entry = opts.load_entry,
     top_map = nil,
   }
-  -- $VIMRUNTIME/lua/vim/_init_packages.lua inserts Neovim's own rtp
-  -- searcher, `vim._load_package`, at `package.loaders[2]` (`table.insert
-  -- (package.loaders, 2, vim._load_package)`, right after the stock
-  -- preload searcher at [1]). Inserting this searcher at the same index 2
-  -- pushes that rtp searcher to [3], so a miss reaches this searcher
-  -- first -- the entry's root then lands on rtp *before* the rtp searcher
-  -- itself runs (on the very next searcher, since this one returns a
-  -- string rather than a loader function).
+  -- Neovim installs its runtimepath searcher at index 2 in _init_packages.lua.
+  -- Run just before it so a deferred plugin reaches runtimepath in time.
   table.insert(package.loaders, 2, searcher)
 end
 

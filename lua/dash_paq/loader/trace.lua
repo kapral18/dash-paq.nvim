@@ -27,7 +27,7 @@ local function trigger_summary(meta)
     parts[#parts + 1] = "keys"
   end
   if #parts == 0 then
-    return "startup"
+    return meta.defer and "manual / require / dependency" or "startup"
   end
   return table.concat(parts, " ")
 end
@@ -97,8 +97,8 @@ function M.setup(ctx)
     vim.bo[bufnr].filetype = "dashpaq-trace"
     local ui = vim.api.nvim_list_uis()[1]
     if ui then
-      local width = math.max(80, math.floor(ui.width * 0.9))
-      local height = math.max(12, math.min(#lines + 2, math.floor(ui.height * 0.8)))
+      local width = math.max(1, math.min(math.max(80, math.floor(ui.width * 0.9)), ui.width - 4))
+      local height = math.max(1, math.min(#lines + 2, math.floor(ui.height * 0.8), ui.height - 4))
       local row = math.floor((ui.height - height) / 2)
       local col = math.floor((ui.width - width) / 2)
       local win = vim.api.nvim_open_win(bufnr, true, {

@@ -1,6 +1,5 @@
 -- Lazy-spec loader over `vim.pack`: flattens specs, resolves versions,
--- installs via `vim.pack.add`, and defers loading behind cmd/event/ft/keys
--- triggers (or loads at startup for `lazy = false` / no-trigger entries).
+-- installs via `vim.pack.add`, and manages startup and deferred loading.
 local M = {}
 
 local spec_mod = require("dash_paq.loader.spec")
@@ -181,20 +180,10 @@ local function run_auto_setup(entry, opts)
   end
 end
 
--- Resolves every dev-capable entry (`entry.is_dev` from spec/pattern match)
--- against its saved choice (`loader/dev.lua`'s dev.json), read once before
--- any entry is touched (independent of `opts.dashboard`):
---   choice "upstream", entry has `src`  -> normal upstream entry.
---   choice matches (normalized) one of the base's *current* candidate
---   checkouts                          -> dev entry at that dir.
---   anything else (no choice, a stale/invalid one, an existing dir that
---   isn't among the base's current candidates, or "upstream" with no
---   `src`)                              -> the default dir for the base
---                                          (falls back to `src`/disables per
---                                          `dev.fallback` when that's nil).
--- Returns `dev_plugin_paths` (name -> active dev dir, for the dashboard) and
--- `dev_capable` (name -> {base, has_src}, every dev-capable entry regardless
--- of its resolved choice, for the dashboard's `L` toggle).
+-- Resolve saved dev choices once, independently of dashboard settings.
+-- Only current candidates or an available upstream are valid; stale choices
+-- use the default checkout, then follow dev.fallback if it is unavailable.
+-- Return active dev paths and all dev-capable entries for the switch controls.
 local function resolve_dev_entries(entries, dev_cfg)
   local dev_plugin_paths = {}
   local dev_capable = {}
@@ -449,8 +438,8 @@ function M.setup(config, dashboard)
         end
       end
 
-      -- `lazy = true` with no other trigger stays deferred forever: loadable
-      -- only via `:DashPaq load` or as a dependency, never at startup.
+      -- Triggerless `lazy = true` entries load through `require()`,
+      -- `:DashPaq load`, or a dependency.
       meta.defer = not force_start
         and (#meta.cmds > 0 or #meta.events > 0 or #meta.fts > 0 or meta.has_keys or explicit_lazy)
       if entry.dep_only and not force_start and not meta.defer then

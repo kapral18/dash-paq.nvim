@@ -1,4 +1,4 @@
--- Unit coverage for loader/dev.lua: pure `git worktree list --porcelain`
+-- Unit coverage for loader/dev.lua: pure `git worktree list --porcelain -z`
 -- parsing, base-dir classification/default resolution, and the dev.json
 -- choices file's tolerant load/save.
 local t = require("runner")
@@ -6,9 +6,9 @@ local dirfixture = require("support.dirfixture")
 local dev = require("dash_paq.loader.dev")
 local fs = require("dash_paq.fs")
 
-t.describe("parsing `git worktree list --porcelain` output (pure, no I/O)", function()
+t.describe("parsing `git worktree list --porcelain -z` output (pure, no I/O)", function()
   t.it("parses a normal branch worktree entry", function()
-    local out = "worktree /repo\nHEAD abc123\nbranch refs/heads/main\n"
+    local out = "worktree /repo\0HEAD abc123\0branch refs/heads/main\0\0"
     local entries = dev.parse_worktree_porcelain(out)
     t.assert.equals(1, #entries)
     t.assert.equals("/repo", entries[1].path)
@@ -18,7 +18,7 @@ t.describe("parsing `git worktree list --porcelain` output (pure, no I/O)", func
   end)
 
   t.it("parses a detached-HEAD worktree entry", function()
-    local out = "worktree /repo/wt-detached\nHEAD abc123\ndetached\n"
+    local out = "worktree /repo/wt-detached\0HEAD abc123\0detached\0\0"
     local entries = dev.parse_worktree_porcelain(out)
     t.assert.equals(1, #entries)
     t.assert.equals("abc123", entries[1].head)
@@ -26,15 +26,15 @@ t.describe("parsing `git worktree list --porcelain` output (pure, no I/O)", func
   end)
 
   t.it("parses a bare repository entry with no HEAD/branch", function()
-    local out = "worktree /repo/bare.git\nbare\n"
+    local out = "worktree /repo/bare.git\0bare\0\0"
     local entries = dev.parse_worktree_porcelain(out)
     t.assert.equals(1, #entries)
     t.assert.truthy(entries[1].bare)
   end)
 
-  t.it("parses multiple blank-line-separated entries in order", function()
-    local out = "worktree /repo\nHEAD abc123\nbranch refs/heads/main\n\n"
-      .. "worktree /repo/wt-feature\nHEAD def456\nbranch refs/heads/feature\n"
+  t.it("parses multiple NUL-separated entries in order", function()
+    local out = "worktree /repo\0HEAD abc123\0branch refs/heads/main\0\0"
+      .. "worktree /repo/wt-feature\0HEAD def456\0branch refs/heads/feature\0\0"
     local entries = dev.parse_worktree_porcelain(out)
     t.assert.equals(2, #entries)
     t.assert.equals("/repo", entries[1].path)
@@ -180,6 +180,17 @@ t.describe("classifying and resolving the default dir for a dev base", function(
     t.assert.equals("container", kind)
     t.assert.truthy(default_ok)
     t.assert.equals(expected, default)
+  end)
+end)
+
+t.describe("WHEN Git reports a worktree path that needs quoting", function()
+  t.it("SHOULD retain non-ASCII names and embedded newlines", function()
+    local base = dirfixture.new("dev-é\ncheckout", { ["plugin/init.lua"] = "-- marker" })
+    local result = vim.system({ "git", "init", "--quiet", "--initial-branch=main", base }, { text = true }):wait()
+    t.assert.equals(0, result.code)
+    local candidates = dev.candidates_for(base)
+    t.assert.equals(1, #candidates)
+    t.assert.equals(fs.real_path(base), candidates[1].path)
   end)
 end)
 

@@ -23,10 +23,6 @@ local function purge_stale_dashboard_state()
   for name in pairs(state.dev_plugin_paths_cache) do
     valid_names[name] = true
   end
-  if next(valid_names) == nil then
-    return false
-  end
-
   local dirty = false
   if type(state.pack_report_cache.plugins) == "table" then
     for name in pairs(state.pack_report_cache.plugins) do

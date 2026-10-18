@@ -74,7 +74,7 @@ local function compute_version_drift(declared, plugin)
 end
 
 -- True when `version = "*"` would select a non-release tag that outranks the
--- greatest real release tag (the `nvim-0.6` > `v0.2.2` footgun).
+-- greatest stable release (for example v2.0.0-rc1 over v1.9.0).
 local function detect_risky_star_pin(is_star, tags)
   if not is_star or type(tags) ~= "table" or #tags == 0 then
     return false

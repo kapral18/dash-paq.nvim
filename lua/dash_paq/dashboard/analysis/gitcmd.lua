@@ -72,9 +72,7 @@ local function tag_gt(a, b)
   return a > b
 end
 
--- The sync (`:wait()`) functions below and `M.prefetch_range`'s async spawns
--- build the SAME git args and parse the SAME `vim.system` result shape through
--- these helpers, so the two call paths cannot diverge.
+-- Sync queries and async prefetch share command builders, parsers, and caches.
 
 local function tag_on_revision_cmd(path, rev)
   return { "-C", path, "tag", "--points-at", rev }
@@ -167,8 +165,7 @@ end
 -- `hash` is the short hash and `message` is the full commit message (subject +
 -- body). Preserves commit boundaries so callers can attribute a breaking marker
 -- to the specific commit that carries it (in subject OR body) and key it by
--- hash. Uses ASCII record/unit separators (RS \30, US \31) as delimiters: git
--- never emits them in messages.
+-- hash. Uses ASCII record/unit separators (RS \30, US \31) as delimiters.
 local function commit_records_between(path, rev_before, rev_after)
   local key = range_key(path, rev_before, rev_after)
   if not key then
@@ -212,20 +209,9 @@ local function pending_updates_between(path, rev_before, rev_after)
   return pending_updates_cache[key] or nil
 end
 
--- Async prefetch for the four breaking-change-inference git calls the sync
--- functions above run per "update" row (`tag_on_revision` x2, plus
--- `commit_messages_between`/`pending_updates_between` for the same range):
--- spawns them in parallel via `vim.system` callbacks (never `:wait()`, so this
--- never blocks the main thread), using the SAME git-args builders and result
--- parsers as the sync path above, into the SAME caches/keys, so a later sync
--- call for the same path/rev(s) is a pure cache hit. Skips any query whose
--- cache slot is already filled. `done` is always called exactly once, even
--- when one or more of the git calls fail (each failing query still caches
--- `false`, matching the sync path).
---
--- `vim.system`'s callback fires in a fast-event context: the callbacks below
--- only touch the plain-Lua caches there, then `vim.schedule` before running
--- anything that could reach `done` (which may end up driving row/UI work).
+-- Prefetch tags and commit text for an update row, skipping cached queries.
+-- Git failures cache false, matching the sync path. Schedule completion out of
+-- fast-event callbacks before callers touch the UI.
 function M.prefetch_range(path, rev_before, rev_after, done)
   local jobs = {}
 

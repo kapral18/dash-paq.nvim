@@ -234,4 +234,31 @@ t.describe("rendering a dashboard with no visible rows", function()
   end)
 end)
 
+t.describe("WHEN the dashboard is narrower than its table", function()
+  t.it("SHOULD wrap header metadata to the window width", function()
+    local view = require("dash_paq.dashboard.ui.view")
+    local c = view.new_context(ctx({ bufnr = vim.api.nvim_create_buf(false, true) }))
+    c.winid = vim.api.nvim_open_win(c.bufnr, false, { relative = "editor", row = 0, col = 0, width = 50, height = 15 })
+    view.render(c)
+    local header = vim.api.nvim_buf_get_lines(c.bufnr, 0, c.header_line_count - 3, false)
+    vim.api.nvim_win_close(c.winid, true)
+    for _, line in ipairs(header) do
+      t.assert.truthy(vim.fn.strdisplaywidth(line) <= 50, "header overflows: " .. line)
+    end
+  end)
+end)
+
+t.describe("WHEN a fetched update is still waiting for checkout", function()
+  t.it("SHOULD count completed rows instead of completed fetches", function()
+    local view = require("dash_paq.dashboard.ui.view")
+    local c = view.new_context(ctx({ bufnr = vim.api.nvim_create_buf(false, true) }))
+    c.online_check_running = true
+    c.online_check_progress = { label = "Updating", total = 2, done = 2 }
+    c.refreshing = { bbb = true }
+    view.render(c)
+    local header = table.concat(vim.api.nvim_buf_get_lines(c.bufnr, 0, c.header_line_count, false), "\n")
+    t.assert.match("Updating:%s*1/2", header)
+  end)
+end)
+
 t.finish()

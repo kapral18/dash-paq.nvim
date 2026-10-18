@@ -31,8 +31,7 @@ local sub_dir = dirfixture.new(
   })
 )
 
--- A dependency whose after/plugin file requires its parent's module (the nvim-cmp source pattern): the parent
--- must already be on 'runtimepath' while its dependencies load.
+-- A dependency's after/plugin file can require its parent's module while the parent is mid-load.
 local dep_parent_dir =
   dirfixture.new("reqdepparent", { ["lua/reqdepparent.lua"] = "return { name = 'reqdepparent' }\n" })
 local dep_child_dir = dirfixture.new("reqdepchild", {
@@ -184,7 +183,7 @@ end)
 t.describe("a dependency's after/plugin requires its parent's module while the parent loads", function()
   vim.api.nvim_exec_autocmds("CursorHold", {})
 
-  t.it("finds the parent on 'runtimepath' (no module-not-found)", function()
+  t.it("resolves the parent's module during dependency loading", function()
     t.assert.truthy(vim.tbl_contains(_G.DASH_PAQ_TEST_LOG, "reqdepchild-saw-reqdepparent"))
     t.assert.falsy(vim.tbl_contains(_G.DASH_PAQ_TEST_LOG, "reqdepchild-require-failed"))
   end)

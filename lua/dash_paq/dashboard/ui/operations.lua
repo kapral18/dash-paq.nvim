@@ -56,17 +56,13 @@ function M.update_by_names(ctx, names, empty_msg, noop_msg)
     end
   end
 
-  -- Unified per-row experience with no UI freeze: the slow network fetch runs
-  -- asynchronously per plugin via the pipeline (online = true), and the moment
-  -- each plugin's remote is fetched it is checked out locally with a fast
-  -- `offline = true, force = true` call (no network, no long block), then its
-  -- row flips to up-to-date. This avoids the monolithic, blocking
-  -- `vim.pack.update(filtered, { force = true })` that freezes the UI and
-  -- spams the command line with fetch progress.
+  -- Fetch asynchronously, then apply local checkouts in bounded batches.
+  -- vim.pack.update still blocks input during each checkout.
   local applied = 0
   refresh.run_row_op(ctx, {
     names = filtered,
     online = true,
+    label = "Updating",
     apply_batch_size = state.dashboard_config.apply_batch_size,
     apply_rows = function(batch)
       local ok, err = pcall(vim.pack.update, batch, { offline = true, force = true })
@@ -80,10 +76,7 @@ function M.update_by_names(ctx, names, empty_msg, noop_msg)
         state.pack_report_cache.last_applied_at = os.time()
         state.pack_report_cache.last_applied_count = applied
         if state.version_policy_enabled then
-          -- Fire-and-forget: `refresh_version_policy_async` yields between
-          -- plugins (policy.lua), so it must never block finalize/the final
-          -- render. It already no-ops safely if a refresh (e.g. the startup
-          -- one) is already in progress (`policy_refresh_in_progress`).
+          -- Policy work yields between plugins and skips an overlapping refresh.
           pcall(policy.refresh_version_policy_async)
         end
       end
@@ -102,17 +95,17 @@ function M.clean_orphan_rows(ctx, targets, scope_label)
     if #preview > 240 then
       preview = preview:sub(1, 237) .. "..."
     end
-    local msg = string.format("Clean %d %s orphan plugin(s)?\n  %s", #targets, scope_label, preview)
+    local msg =
+      string.format("Delete %d %s orphan plugin(s) from disk and the lockfile?\n  %s", #targets, scope_label, preview)
     if vim.fn.confirm(msg, "&Yes\n&No", 2) ~= 1 then
-      vim.notify("Clean cancelled", vim.log.levels.INFO)
+      vim.notify("Deletion cancelled", vim.log.levels.INFO)
       return
     end
   end
 
-  -- Unified per-row experience: orphan rows show a spinner during the delete,
-  -- then drop out of the table when the op completes.
   refresh.run_row_op(ctx, {
     names = targets,
+    label = "Deleting",
     remove_on_done = true,
     apply = function()
       vim.pack.del(targets)
@@ -126,14 +119,11 @@ function M.heal_drift_rows(ctx, targets)
     return
   end
 
-  -- Unified per-row experience: drifted rows show a spinner while they are
-  -- re-checked out to their declared spec, then flip to their healed status.
-  -- `force = true, offline = true` re-checkouts local refs directly (no
-  -- confirmation tabpage). The drift/risky flags are re-derived afterwards
-  -- since they, not the update/same status, decide the healed row state.
+  -- Recompute drift flags after checkout; they override the update/same status.
   refresh.run_row_op(ctx, {
     names = targets,
     online = false,
+    label = "Restoring versions",
     apply = function()
       vim.pack.update(targets, { offline = true, force = true })
       state.version_flags_cache = {}
@@ -221,6 +211,13 @@ function M.toggle_dev(row, hooks)
   end
 
   local active = state.dev_plugin_paths_cache[name] or "upstream"
+  -- A saved switch is pending until restart. Use it for repeat toggles too.
+  local saved = dev.load_choices()[name]
+  if saved == "upstream" and info.has_src then
+    active = saved
+  elseif saved and saved ~= "upstream" then
+    active = dev.matching_candidate_path(info.base, saved) or active
+  end
   local options = dev_toggle_options(info, active)
   if #options < 2 then
     vim.notify(name .. ": no alternate dev checkout available", vim.log.levels.WARN)

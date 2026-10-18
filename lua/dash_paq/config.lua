@@ -52,6 +52,13 @@ M.defaults = {
   },
 }
 
+local function resolve_section(value, defaults)
+  if value == false then
+    return false
+  end
+  return vim.tbl_deep_extend("force", vim.deepcopy(defaults), type(value) == "table" and value or {})
+end
+
 function M.setup(opts)
   opts = opts or {}
   assert(type(opts) == "table", "dash_paq.setup(opts): opts must be a table")
@@ -73,33 +80,10 @@ function M.setup(opts)
     ),
   }
 
-  if opts.dashboard == false then
-    resolved.dashboard = false
-  else
-    resolved.dashboard = vim.tbl_deep_extend(
-      "force",
-      vim.deepcopy(M.defaults.dashboard),
-      type(opts.dashboard) == "table" and opts.dashboard or {}
-    )
-  end
-
-  if opts.version_policy == false then
-    resolved.version_policy = false
-  else
-    resolved.version_policy = vim.tbl_deep_extend(
-      "force",
-      vim.deepcopy(M.defaults.version_policy),
-      type(opts.version_policy) == "table" and opts.version_policy or {}
-    )
-  end
+  resolved.dashboard = resolve_section(opts.dashboard, M.defaults.dashboard)
+  resolved.version_policy = resolve_section(opts.version_policy, M.defaults.version_policy)
+  resolved.dev = resolve_section(opts.dev, M.defaults.dev) or nil
   policy.configure(resolved.version_policy or {})
-
-  if opts.dev == false then
-    resolved.dev = nil
-  else
-    resolved.dev =
-      vim.tbl_deep_extend("force", vim.deepcopy(M.defaults.dev), type(opts.dev) == "table" and opts.dev or {})
-  end
 
   return resolved
 end

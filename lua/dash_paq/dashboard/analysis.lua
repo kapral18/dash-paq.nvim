@@ -1,10 +1,4 @@
--- Facade over the analysis submodules. The rest of the dashboard requires
--- `dash_paq.dashboard.analysis` and calls the names re-exported here;
--- the concrete logic lives in the cohesive submodules under `analysis/`:
---   version  - spec/checkout version predicates, drift, risky `*` pins
---   gitcmd   - cached `git tag`/`git log` shell-outs
---   signals  - conventional-commit message classification
---   url      - source/repo/compare URL parsing
+-- Version, commit-message, and URL analysis used by dashboard reports.
 local semver = require("dash_paq.semver")
 local version = require("dash_paq.dashboard.analysis.version")
 local gitcmd = require("dash_paq.dashboard.analysis.gitcmd")

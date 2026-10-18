@@ -1,6 +1,5 @@
 local state = require("dash_paq.dashboard.state")
 local analysis = require("dash_paq.dashboard.analysis")
-local fmt = require("dash_paq.dashboard.ui.format")
 local render = require("dash_paq.dashboard.ui.render")
 
 local M = {}
@@ -85,7 +84,13 @@ function M.open_details(ctx, row)
   local lines = {
     ("Plugin: %s"):format(row.name),
     ("Status: %s"):format(row.status),
-    ("Risk:   %s"):format(fmt.risk_label(ctx, row)),
+    ("Risk:   %s"):format(
+      row.status ~= "update" and "not assessed"
+        or (
+          row.breaking == true and "potential breaking change"
+          or (row.breaking == false and "no breaking signal detected" or "unknown")
+        )
+    ),
     ("Risk reason: %s"):format(row.risk_reason or "-"),
     ("Semver delta: %s"):format(row.semver_delta or "n/a"),
     ("Commit signals: %s"):format(row.commit_signal or "none"),
@@ -111,18 +116,10 @@ function M.open_details(ctx, row)
   field_lines[10] = true
   field_lines[11] = true
 
-  -- Always announce a breaking verdict up front so the popup never contradicts
-  -- the row flag, even when the evidence is a semver-major bump with no marker
-  -- text in any commit (then there is no changelog line to highlight).
-  if row.breaking == true then
-    lines[#lines + 1] = ("⚠ Breaking: %s"):format(row.risk_reason or "flagged breaking")
-    breaking_lines[#lines] = true
-  end
-
   -- Highlight exactly the pending commits whose full message (subject or body,
   -- any case) carries a breaking marker. The pending list shows subjects only,
   -- but breaking markers often live in the body, so we classify per commit hash
-  -- rather than by the visible subject text. `o`/`O` open the diff/repo for the
+  -- rather than by the visible subject text. `o`/`O` open the commit/diff for the
   -- full detail.
   local p_cache = state.pack_report_cache.plugins[row.name]
   local p_path = p_cache and p_cache.path
@@ -211,8 +208,8 @@ function M.open_details(ctx, row)
 
   local editor_w = vim.o.columns
   local editor_h = vim.o.lines - vim.o.cmdheight
-  local width = math.min(math.max(90, math.floor(editor_w * 0.75)), editor_w - 4)
-  local height = math.min(math.max(22, math.floor(editor_h * 0.70)), editor_h - 4)
+  local width = math.max(1, math.min(math.max(90, math.floor(editor_w * 0.75)), editor_w - 4))
+  local height = math.max(1, math.min(math.max(22, math.floor(editor_h * 0.70)), editor_h - 4))
   ctx.details_winid = vim.api.nvim_open_win(ctx.details_bufnr, true, {
     relative = "editor",
     style = "minimal",
@@ -284,6 +281,9 @@ function M.open_help()
     "K          open details popup",
     "L          toggle local dev checkout (upstream/local worktree), offers restart",
     "T          open load trace (current plugin)",
+    "",
+    "Risk: ! potential breaking change; + no breaking signal; - unknown/not assessed.",
+    "Signals come from versions and commit messages; they do not prove compatibility.",
   }
   local hbuf = vim.api.nvim_create_buf(false, true)
   vim.bo[hbuf].buftype = "nofile"
@@ -294,8 +294,8 @@ function M.open_help()
 
   local editor_w = vim.o.columns
   local editor_h = vim.o.lines - vim.o.cmdheight
-  local width = math.min(88, editor_w - 4)
-  local height = math.min(#help_lines + 2, editor_h - 4)
+  local width = math.max(1, math.min(88, editor_w - 4))
+  local height = math.max(1, math.min(#help_lines + 2, editor_h - 4))
   local hwin = vim.api.nvim_open_win(hbuf, true, {
     relative = "editor",
     style = "minimal",
@@ -307,6 +307,7 @@ function M.open_help()
     width = width,
     height = height,
   })
+  vim.wo[hwin].wrap = true
   local close = function()
     if hwin and vim.api.nvim_win_is_valid(hwin) then
       vim.api.nvim_win_close(hwin, true)

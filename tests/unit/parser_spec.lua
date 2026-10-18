@@ -61,6 +61,11 @@ t.describe("parsing a real 0.12.4 report with an Error section", function()
     t.assert.truthy(plugins.badref ~= nil)
     t.assert.equals("error", plugins.badref.status)
   end)
+
+  t.it("SHOULD retain the error and recovery details for the details popup", function()
+    t.assert.match("fatal: Could not read from remote repository", plugins.badref.pending_updates)
+    t.assert.match("correct access rights", plugins.badref.pending_updates)
+  end)
 end)
 
 t.describe("a plugin heading carries the '(not active)' suffix", function()
