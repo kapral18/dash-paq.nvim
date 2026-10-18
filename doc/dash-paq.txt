@@ -159,12 +159,15 @@ Supported fields:
                    load, any route. `lhs`-only: loads the plugin,
                    replays `lhs` into its own mapping.
   `cmd`            String/list of command names, deferring load until
-                   first use; forwards `<bang>`/range/count/`<mods>`/args
-                   to the real command.
-  `event`          String, `{event, pattern}` table, or list; defers load
-                   until fired. After load, only the plugin's own
-                   autocmd group(s) replay: by buffer for a
-                   filename-shaped event, `pattern` for
+                   first use; forwards `<bang>`/range/`<mods>`/args.
+                   The lazy stub treats numeric prefixes as line ranges,
+                   so count-taking commands may fail with E16. Use
+                   |:DashPaq-load| before invoking one with a count.
+  `event`          String, `{ event = "User", pattern = "Ready" }`, or a
+                   list; defers load until fired. After loading, the
+                   event replays only in augroups that had no handler
+                   for it before loading. Replay uses the buffer for
+                   filename-shaped events, `pattern` for
                    `User`/`CmdlineEnter`/`ColorScheme`/`OptionSet`/
                    `ModeChanged` (others by buffer, may not match); no
                    augroup, no replay.
@@ -186,11 +189,10 @@ opt-in spec field; a disabled entry is never loaded this way, and
 
 Unsupported fields                                 *dash-paq-spec-unsupported*
 
-Not read by dash-paq.nvim: `main`/`module` (lazy.nvim's opt-in fields
-for require-triggered loading -- here it's automatic instead, see
-above), `import`/`specs`/`pin`/`submodules`/`url`, and lazy.nvim's
-synthetic `VeryLazy`/`User` startup events (`event = "User"` with your
-own `pattern` still works; lazy.nvim's own firing isn't replicated).
+Not read by dash-paq.nvim: `main`/`module`/`import`/`specs`/`pin`/
+`submodules`/`url`, and lazy.nvim's synthetic `VeryLazy`/`User` startup
+events (`event = "User"` with your own `pattern` still works;
+lazy.nvim's own firing isn't replicated).
 
 ==============================================================================
 6. Configuration                                             *dash-paq-config*
@@ -256,8 +258,9 @@ and their arguments complete with <Tab>.
 
 :DashPaq[!]                                                         *:DashPaq*
 Open the dashboard; repeated calls reuse the window. `!` closes an open
-dashboard and reopens it with a fresh scan. `!` is rejected on every
-other subcommand.
+dashboard and opens a new one. Opening honors `refresh_on_open`: it
+fetches only when enabled. Use `R` to refresh online or `r` offline.
+`!` is rejected on every other subcommand.
 
 :DashPaq sync                                                  *:DashPaq-sync*
 Fetch remotes and open `vim.pack.update()`'s update confirmation.
@@ -301,8 +304,8 @@ them. |:DashPaq-sync| instead updates each plugin to its spec's
 :DashPaq toggle-dev {plugin}                             *:DashPaq-toggle-dev*
 Flip a dev-capable plugin between its upstream `vim.pack` clone and its dev
 checkout, without the dashboard: to `upstream` when it currently uses a dev
-checkout, else to the dev checkout (the base's default, the main
-worktree). It flips from the saved `dev.json` choice, so repeating it
+checkout, else to the base's default dev checkout (|dash-paq-dev|).
+It flips from the saved `dev.json` choice, so repeating it
 before a restart toggles back. Warns when there is nothing to switch to
 (no `src` for upstream, or no dev checkout). Takes effect on restart and
 offers one; see |dash-paq-dev-toggle|. Works with `opts.dashboard =
@@ -328,10 +331,12 @@ Buffer-local to the dashboard window:
   `a`              select all visible; deselect them if all are selected
   `A`              clear selection
   `<CR>`           update cursor plugin, if pending
-  `u`              update selected, else cursor, pending
+  `u`              update pending plugins among visible selections;
+                   with no visible selection, use the cursor row
   `U`              update all visible pending
-  `C`              clean orphans (selected, else all), confirm
-  `V`              heal drift: re-checkout to declared version, offline
+  `C`              clean selected orphans, else all orphans; confirm
+  `V`              heal selected drifted plugins, else all drifted plugins;
+                   re-checkout to declared version offline
   `o`              open diff URL, fallback repo URL
   `O`              open repo URL
   `K`              open the details popup
@@ -344,6 +349,8 @@ Buffer-local to the dashboard window:
   `/`              search by name substring
   `c`              clear the search
   `?`              open the key-reference help popup
+
+`C` and `V` include rows hidden by search or filters.
 
 `<CR>`/`u`/`U` fetch in the background, then check out each fetched
 plugin with `vim.pack.update`, which blocks input while it runs. While
@@ -388,20 +395,25 @@ per tick) or sync on |:DashPaq-sync|/|:DashPaq-status|/
 startup's `setup()` call, not immediately; the first time a policy is
 generated, dash-paq.nvim notifies "restart to apply tag pins".
 
-No semver-shaped tags always resolves to `branch`. Otherwise four gates
-apply, in order, against commits landed since the latest tag:
+With no semver-shaped tags, the policy selects `branch`. When the branch
+tip is at the latest tag, it selects `tags`.
 
-  1. Release-history (`min_tags`/`sparse_tag_threshold`): under
-     `min_tags` tags, `branch` only past `sparse_tag_threshold` commits
-     since the last tag.
-  2. Commit-ratio (`commit_lag_multiplier`/`avg_window`): `branch` when
+With fewer than `min_tags` tags, it selects `branch` only when commits
+since the latest tag exceed `sparse_tag_threshold`; otherwise, `tags`.
+This ends evaluation: the ratio, age, and cap checks do not apply.
+
+With at least `min_tags` tags, it selects `branch` when any of these holds:
+
+  1. Commit-ratio (`commit_lag_multiplier`/`avg_window`):
      commits since the latest tag exceed a recency-weighted average
      commits-per-release over the last `avg_window` (floor 3) tags,
      times `commit_lag_multiplier`.
-  3. Tag-age (`max_tag_age_days`): `branch` when the latest tag is older
-     than `max_tag_age_days` and a commit has landed since.
-  4. Absolute-cap (`max_commits_since_tag`): past this many commits
-     since the latest tag, always `branch`.
+  2. Tag-age (`max_tag_age_days`): the latest tag is older than
+     `max_tag_age_days` and a commit has landed since.
+  3. Absolute-cap (`max_commits_since_tag`): commits since the latest
+     tag exceed `max_commits_since_tag`.
+
+Otherwise, it selects `tags`.
 
 A `tags` decision resolves to a caret/tilde range from the latest tag
 (`^MAJOR.0` for `MAJOR >= 1`, else `~0.MINOR`), so `vim.pack` resolves
