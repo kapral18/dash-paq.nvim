@@ -45,7 +45,9 @@ end
 
 -- Resolve the Git ref that `version` points at, mirroring vim.pack's
 -- `resolve_version`. Async because branch/tag resolution shells out to git.
--- Calls `done(ref, err)`.
+-- Calls `done(ref, err, label)`; `label` is vim.pack's `version_str` (the
+-- default branch, the version, or the chosen tag) that its report shows in
+-- parentheses after the revision.
 local function resolve_target_ref(path, version, done)
   if version == nil then
     git_capture(path, { "rev-parse", "--abbrev-ref", "origin/HEAD" }, function(out, err)
@@ -53,7 +55,8 @@ local function resolve_target_ref(path, version, done)
         done(nil, err or "no default branch")
         return
       end
-      done("origin/" .. (out:gsub("^origin/", "")), nil)
+      local branch = out:gsub("^origin/", "")
+      done("origin/" .. branch, nil, branch)
     end)
     return
   end
@@ -70,7 +73,7 @@ local function resolve_target_ref(path, version, done)
         done(nil, "no tag fits version constraint")
         return
       end
-      done(tag, nil)
+      done(tag, nil, tag)
     end)
     return
   end
@@ -85,7 +88,7 @@ local function resolve_target_ref(path, version, done)
           break
         end
       end
-      done(is_branch and ("origin/" .. version) or version, nil)
+      done(is_branch and ("origin/" .. version) or version, nil, version)
     end)
     return
   end
@@ -95,8 +98,9 @@ end
 
 -- Compute one plugin's offline status (HEAD vs target). `online` controls
 -- whether a `git fetch` runs first. `done(result)` receives:
---   { name, path, source, status, rev_before, rev_after, error }
+--   { name, path, source, status, rev_before, rev_after, version_label, error }
 local function refresh_one(target, online, done)
+  local version_label
   local function finalize(status, rev_before, rev_after, err)
     done({
       name = target.name,
@@ -105,6 +109,7 @@ local function refresh_one(target, online, done)
       status = status,
       rev_before = rev_before,
       rev_after = rev_after,
+      version_label = version_label,
       error = err,
     })
   end
@@ -115,7 +120,8 @@ local function refresh_one(target, online, done)
         finalize("error", nil, nil, head_err or "failed to read HEAD")
         return
       end
-      resolve_target_ref(target.path, target.version, function(ref, ref_err)
+      resolve_target_ref(target.path, target.version, function(ref, ref_err, label)
+        version_label = label
         if not ref then
           finalize("error", sha_head, nil, ref_err or "failed to resolve target")
           return

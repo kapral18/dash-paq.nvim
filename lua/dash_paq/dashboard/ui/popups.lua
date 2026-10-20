@@ -208,7 +208,14 @@ function M.open_details(ctx, row)
   end
 
   b.blank()
-  add_key_hints(b, { { "q", "close" }, { "o", "open commit" }, { "O", "open compare page" }, { "r", "open repo" } })
+  -- `o` and `O` mean what they mean in the dashboard, plus the commit under
+  -- the cursor.
+  add_key_hints(b, {
+    { "q", "close" },
+    { "o", "open commit, else compare page or repo" },
+    { "O", "open repository" },
+    { "r", "refresh" },
+  })
   local lines = b.lines
 
   ctx.details_bufnr = vim.api.nvim_create_buf(false, true)
@@ -238,7 +245,7 @@ function M.open_details(ctx, row)
     local current = lines[cursor[1]] or ""
     local hash = pending_line_hash(current)
     if not hash then
-      vim.notify("Move the cursor onto a pending commit line to open it", vim.log.levels.WARN)
+      require("dash_paq.dashboard.ui.operations").open_diff_or_repo_for_row(row)
       return
     end
     local commit_url = analysis.repo_to_commit_url(row.repo_url, hash)
@@ -249,18 +256,16 @@ function M.open_details(ctx, row)
     end
   end, { buffer = ctx.details_bufnr, nowait = true, silent = true })
   vim.keymap.set("n", "O", function()
-    if row.diff_url then
-      vim.ui.open(row.diff_url)
-    else
-      vim.notify("No compare page for this plugin", vim.log.levels.WARN)
-    end
-  end, { buffer = ctx.details_bufnr, nowait = true, silent = true })
-  vim.keymap.set("n", "r", function()
     if row.repo_url then
       vim.ui.open(row.repo_url)
     else
       vim.notify("No repository for this plugin", vim.log.levels.WARN)
     end
+  end, { buffer = ctx.details_bufnr, nowait = true, silent = true })
+  -- As in the dashboard: the refresh redraws the rows this popup describes.
+  vim.keymap.set("n", "r", function()
+    M.close_details(ctx)
+    require("dash_paq.dashboard.ui.refresh").refresh(ctx, false)
   end, { buffer = ctx.details_bufnr, nowait = true, silent = true })
 end
 

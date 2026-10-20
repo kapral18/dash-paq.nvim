@@ -377,9 +377,11 @@ the status in the title and its risk, reason, semver, signals, version,
 source, repo, and compare page.
 
   `q`/`<Esc>`   close the popup
-  `o`           open the commit under the cursor
-  `O`           open the compare page for every pending commit
-  `r`           open the plugin repository
+  `o`           open the commit under the cursor; elsewhere, as in the
+                dashboard: the compare page of a pending update, else the
+                repository
+  `O`           open the plugin repository
+  `r`           close the popup and refresh offline, as in the dashboard
 
 Row statuses, by the words the dashboard shows: `update`, `up to date`,
 `failed` (the check or update failed), `not checked`, `not in spec`

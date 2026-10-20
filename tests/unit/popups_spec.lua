@@ -48,7 +48,10 @@ t.describe("WHEN the details popup opens", function()
     t.assert.truthy(vim.tbl_contains(lines, "  Version  v4.9.0 -> v5.0.0"))
     t.assert.truthy(vim.tbl_contains(lines, "  Pending updates (2)"))
     t.assert.truthy(vim.tbl_contains(lines, "    > 1a2b3c4d │ feat: tabs"))
-    t.assert.equals("  q close · o open commit · O open compare page · r open repo", lines[#lines])
+    t.assert.equals(
+      "  q close · o open commit, else compare page or repo · O open repository · r refresh",
+      lines[#lines]
+    )
   end)
 
   t.it("SHOULD be as wide as the dashboard and as tall as its content", function()
@@ -85,6 +88,57 @@ t.describe("WHEN the details popup opens", function()
     vim.api.nvim_feedkeys("o", "x", false)
     vim.ui.open = original
     t.assert.match("5e6f7a8b", opened or "")
+  end)
+end)
+
+t.describe("WHEN o, O, or r is pressed off a commit line in the details popup", function()
+  local function press(key, details_row)
+    local c = new_ctx()
+    popups.open_details(c, details_row)
+    local opened
+    local original = vim.ui.open
+    vim.ui.open = function(url)
+      opened = url
+    end
+    local ok, err = pcall(function()
+      vim.api.nvim_set_current_win(c.details_winid)
+      vim.api.nvim_win_set_cursor(c.details_winid, { 2, 0 })
+      vim.api.nvim_feedkeys(key, "x", false)
+    end)
+    vim.ui.open = original
+    popups.close_details(c)
+    assert(ok, err)
+    return opened
+  end
+  local with_compare = vim.tbl_extend("force", row, { diff_url = "https://example.com/compare" })
+
+  t.it("SHOULD open the compare page with o, as in the dashboard", function()
+    t.assert.equals("https://example.com/compare", press("o", with_compare))
+  end)
+
+  t.it("SHOULD open the repository with O, as in the dashboard", function()
+    t.assert.equals(row.repo_url, press("O", with_compare))
+  end)
+
+  t.it("SHOULD close and refresh offline with r, as in the dashboard", function()
+    local refresh = require("dash_paq.dashboard.ui.refresh")
+    local c = new_ctx()
+    popups.open_details(c, row)
+    local called
+    local original = refresh.refresh
+    refresh.refresh = function(ctx, online)
+      called = { ctx = ctx, online = online }
+    end
+    local ok, err = pcall(function()
+      vim.api.nvim_set_current_win(c.details_winid)
+      vim.api.nvim_feedkeys("r", "x", false)
+    end)
+    refresh.refresh = original
+    local still_open = c.details_winid ~= nil and vim.api.nvim_win_is_valid(c.details_winid)
+    popups.close_details(c)
+    assert(ok, err)
+    t.assert.truthy(called and called.ctx == c and called.online == false)
+    t.assert.falsy(still_open)
   end)
 end)
 

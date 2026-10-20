@@ -23,8 +23,17 @@ local function infer_breaking_status(p_data)
     p_data.pending_updates = gitcmd.pending_updates_between(p_data.path, p_data.rev_before, p_data.rev_after)
   end
 
-  local before_version = p_data.current_version or gitcmd.tag_on_revision(p_data.path, p_data.rev_before)
-  local after_version = p_data.target_version or gitcmd.tag_on_revision(p_data.path, p_data.rev_after)
+  -- A label that is not a full version (a branch, like vim.pack's `(main)` or
+  -- `(v2)`) gives way to the tag on that revision, so a tagged tip still yields
+  -- a semver delta.
+  local function version_at(label, rev)
+    if label and label:match("^v?%d+%.%d+%.%d+") then
+      return label
+    end
+    return gitcmd.tag_on_revision(p_data.path, rev) or label
+  end
+  local before_version = version_at(p_data.current_version, p_data.rev_before)
+  local after_version = version_at(p_data.target_version, p_data.rev_after)
   p_data.current_version = before_version
   p_data.target_version = after_version
 

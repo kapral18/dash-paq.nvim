@@ -129,8 +129,10 @@ local function apply_pipeline_result(ctx, result, counts)
     -- stale pending/delta/signal/reason never survives into this verdict.
     entry.breaking = nil
     entry.diff_url = nil
-    entry.current_version = nil
-    entry.target_version = nil
+    -- vim.pack's report shows the version label on `Revision:` for a current
+    -- plugin and on `Revision after:` for a pending one; mirror that.
+    entry.current_version = result.status == "same" and result.version_label or nil
+    entry.target_version = result.status == "update" and result.version_label or nil
     entry.pending_updates = nil
     entry.semver_delta = nil
     entry.commit_signal = nil
