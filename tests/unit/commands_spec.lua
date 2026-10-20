@@ -151,4 +151,18 @@ t.describe("WHEN completion runs before existing arguments", function()
   end)
 end)
 
+t.describe("WHEN :DashPaq is abbreviated, prefixed, or filtered by a non-prefix", function()
+  t.it("SHOULD complete an abbreviated command name", function()
+    t.assert.same({ "lock", "sync", "trace" }, commands.complete("", "DashP "))
+  end)
+
+  t.it("SHOULD complete after a command modifier", function()
+    t.assert.same({ "trace" }, commands.complete("tr", "silent DashPaq tr"))
+  end)
+
+  t.it("SHOULD match subcommands by prefix only", function()
+    t.assert.same({}, commands.complete("ac", "DashPaq ac"))
+  end)
+end)
+
 t.finish()

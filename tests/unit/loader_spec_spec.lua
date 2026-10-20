@@ -61,6 +61,11 @@ t.describe("deriving module-name candidates for auto-setup", function()
     t.assert.truthy(vim.tbl_contains(candidates, "treesitter"))
   end)
 
+  t.it("strips a .lua or -lua suffix", function()
+    t.assert.truthy(vim.tbl_contains(spec_mod.derive_module_candidates({ name = "dim.lua" }), "dim"))
+    t.assert.truthy(vim.tbl_contains(spec_mod.derive_module_candidates({ name = "tabout-lua" }), "tabout"))
+  end)
+
   t.it("converts dashes to underscores", function()
     local candidates = spec_mod.derive_module_candidates({ name = "my-plugin" })
     t.assert.truthy(vim.tbl_contains(candidates, "my_plugin"))
@@ -411,6 +416,124 @@ t.describe("WHEN merged specs match dev.patterns", function()
       { "owner/plug", dev = true },
     }, { dev = { path = "/tmp/projects", patterns = { "^plug$" } } })
     t.assert.equals(true, entries.plug.is_dev)
+  end)
+end)
+
+t.describe("WHEN a spec fails or cannot be read", function()
+  local function flatten(direct, modules)
+    local errors = {}
+    local entries = spec_mod.flatten_specs(modules or {}, direct, {
+      notify_err = function(msg)
+        errors[#errors + 1] = msg
+      end,
+    })
+    return entries, table.concat(errors, "\n")
+  end
+
+  t.it("SHOULD pass the spec to a cond function, as lazy.nvim does", function()
+    local entries = flatten({
+      {
+        "owner/condplug",
+        cond = function(plugin)
+          return plugin.name == "condplug"
+        end,
+      },
+    })
+    t.assert.equals(true, entries.condplug.enabled)
+  end)
+
+  t.it("SHOULD report a cond function that throws", function()
+    local entries, errors = flatten({
+      {
+        "owner/boomcond",
+        cond = function()
+          error("cond exploded")
+        end,
+      },
+    })
+    t.assert.equals(false, entries.boomcond.enabled)
+    t.assert.match("boomcond", errors)
+    t.assert.match("cond exploded", errors)
+  end)
+
+  t.it("SHOULD report the Lua error of a spec module that fails to load", function()
+    package.preload["fixture_mod_syntax"] = function()
+      error("unexpected symbol near 'x'")
+    end
+    local _, errors = flatten({}, { "fixture_mod_syntax" })
+    package.preload["fixture_mod_syntax"] = nil
+    t.assert.match("fixture_mod_syntax", errors)
+    t.assert.match("unexpected symbol", errors)
+  end)
+
+  t.it("SHOULD report the Lua error of a keys function that throws", function()
+    local errors = {}
+    spec_mod.normalize_key_specs(function()
+      error("keys exploded")
+    end, { name = "keysplug" }, function(msg)
+      errors[#errors + 1] = msg
+    end)
+    t.assert.match("keys exploded", table.concat(errors))
+  end)
+
+  t.it("SHOULD report the Lua error of an opts function that throws", function()
+    local errors = {}
+    spec_mod.resolve_opts({
+      name = "optsplug",
+      specs = {
+        {
+          opts = function()
+            error("opts exploded")
+          end,
+        },
+      },
+    }, function(msg)
+      errors[#errors + 1] = msg
+    end)
+    t.assert.match("opts exploded", table.concat(errors))
+  end)
+
+  t.it("SHOULD point a lazy.nvim import at opts.modules", function()
+    local entries, errors = flatten({ { import = "plugins" } })
+    t.assert.same({}, entries)
+    t.assert.match("import", errors)
+    t.assert.match("modules", errors)
+  end)
+
+  t.it("SHOULD report import on a spec that also has a source, and keep the spec", function()
+    local entries, errors = flatten({ { "LazyVim/LazyVim", import = "lazyvim.plugins" } })
+    t.assert.truthy(entries.LazyVim)
+    t.assert.match("lazyvim.plugins", errors)
+  end)
+
+  t.it("SHOULD read lazy.nvim-style string keys", function()
+    local list = spec_mod.normalize_key_specs({ "<leader>a", { "<leader>b", mode = "x" } }, { name = "p" })
+    t.assert.same({ "<leader>a", "n" }, { list[1].lhs, list[1].mode })
+    t.assert.same({ "<leader>b", "x" }, { list[2].lhs, list[2].mode })
+    t.assert.equals("<leader>c", spec_mod.normalize_key_specs("<leader>c", { name = "p" })[1].lhs)
+  end)
+
+  t.it("SHOULD report a function import readably, naming the spec", function()
+    local _, errors = flatten({ {
+      "owner/importer",
+      import = function()
+        return {}
+      end,
+    } })
+    t.assert.match("importer: `import` is not supported", errors)
+    t.assert.falsy(errors:find("function:", 1, true), errors)
+  end)
+
+  t.it("SHOULD skip an empty spec or dependency silently", function()
+    local entries, errors = flatten({ { "owner/kept", dependencies = { {} } }, {} })
+    t.assert.truthy(entries.kept)
+    t.assert.equals("", errors)
+  end)
+
+  t.it("SHOULD flatten a nested list of specs", function()
+    local entries, errors = flatten({ { { "owner/nested_a" }, { "owner/nested_b" } } })
+    t.assert.truthy(entries.nested_a and entries.nested_b)
+    t.assert.equals("", errors)
   end)
 end)
 

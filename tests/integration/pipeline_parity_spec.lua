@@ -79,7 +79,16 @@ parser.parse_pack_report_buffer(bufnr)
 local vim_pack_status, vim_pack_label = {}, {}
 for name, p in pairs(state.pack_report_cache.plugins) do
   vim_pack_status[name] = p.status
-  vim_pack_label[name] = p.status == "update" and p.target_version or p.current_version
+end
+-- The label as vim.pack prints it ("Revision: sha (label)" / "Revision after: sha (label)"), before the
+-- dashboard's own analysis replaces a branch label with the target's tag.
+local section
+for _, line in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+  section = line:match("^## (%S+)") or section
+  local label = line:match("^Revision:%s+%x+ %((.-)%)$") or line:match("^Revision after:%s+%x+ %((.-)%)$")
+  if section and label then
+    vim_pack_label[section] = label
+  end
 end
 
 t.describe("the pipeline's version labels", function()
@@ -115,6 +124,11 @@ t.describe("WHEN a dashboard refresh finishes", function()
     t.assert.equals("v1.0.0 -> v2.0.0", require("dash_paq.dashboard.ui.format").version_cell(row))
     t.assert.equals("major", row.semver_delta)
     t.assert.equals(true, row.breaking)
+  end)
+
+  t.it("SHOULD show an untagged branch update's target commit, not the branch name", function()
+    local row = require("dash_paq.dashboard.report").collect_dashboard_row("branchplug")
+    t.assert.match("^%x+ %-> %x+$", require("dash_paq.dashboard.ui.format").version_cell(row))
   end)
 
   t.it("SHOULD read the tag on the new tip of a branch named like a version", function()

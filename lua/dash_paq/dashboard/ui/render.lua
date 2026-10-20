@@ -123,7 +123,9 @@ local function apply_row_highlights(ctx, line_no, row, ranges)
   end
   if ranges.note then
     pcall(vim.api.nvim_buf_set_extmark, ctx.bufnr, dashboard_ns, line_no - 1, ranges.note.start_col, {
-      hl_group = row.status == "update" and "DashPaqRiskBreak" or status_hl[row.status] or "DashPaqMeta",
+      hl_group = row.status == "update" and (row.breaking == true and "DashPaqRiskBreak" or "DashPaqMeta")
+        or status_hl[row.status]
+        or "DashPaqMeta",
       end_col = ranges.note.end_col,
     })
   end

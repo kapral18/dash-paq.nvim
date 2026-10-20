@@ -22,7 +22,9 @@ local function top_level_modules(entry)
   end
   local handle = vim.uv.fs_scandir(vim.fs.joinpath(root, "lua"))
   if not handle then
-    return nil
+    -- An installed root without `lua/` (a Vimscript plugin) provides no
+    -- modules; only a missing root is unavailable and retried on later misses.
+    return vim.uv.fs_stat(root) and names or nil
   end
   while true do
     local name, ftype = vim.uv.fs_scandir_next(handle)

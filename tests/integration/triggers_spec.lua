@@ -68,7 +68,7 @@ end
 -- keys with a plain string rhs: the real mapping must be noremap, even on the very first press.
 local noremap_keys_dir = dirfixture.new("noremapkeysplug", dirfixture.marker_plugin_files("noremapkeysplug-loaded"))
 
--- lhs-only keys with mode {n, o}: the stub must stay expr=true so an operator-pending use doesn't cancel it.
+-- lhs-only keys with mode {n, o}: the operator-pending stub must stay expr=true so its use doesn't cancel the operator.
 local op_keys_dir = dirfixture.new("opkeysplug", dirfixture.marker_plugin_files("opkeysplug-loaded"))
 
 local unrelated_count = 0
@@ -97,6 +97,52 @@ local existing_key_count = 0
 local count_received
 require("dash_paq").setup({
   spec = {
+    {
+      dir = dirfixture.new("bufkeys", {}),
+      name = "bufkeys",
+      keys = { { "<F3>" } },
+      config = function()
+        local ok = pcall(function()
+          local buf = vim.api.nvim_create_buf(false, true)
+          vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "configured" })
+          local win =
+            vim.api.nvim_open_win(buf, false, { relative = "editor", row = 0, col = 0, width = 10, height = 1 })
+          vim.api.nvim_win_close(win, true)
+        end)
+        vim.g.bufkeys_config_ok = ok
+        vim.keymap.set("n", "<F3>", function()
+          vim.g.bufkeys_count = vim.v.count
+        end)
+      end,
+    },
+    {
+      dir = dirfixture.new("regkeys", {}),
+      name = "regkeys",
+      keys = { { "<F4>" } },
+      config = function()
+        vim.keymap.set("n", "<F4>", function()
+          vim.g.regkeys_seen = { register = vim.v.register, count = vim.v.count }
+        end)
+      end,
+    },
+    {
+      dir = dirfixture.new("inskeys", {}),
+      name = "inskeys",
+      keys = { { "<F10>", mode = "i" } },
+      config = function()
+        vim.keymap.set("i", "<F10>", "X")
+      end,
+    },
+    {
+      dir = dirfixture.new("markcmd", {}),
+      name = "markcmd",
+      cmd = "FixtureMarkCmd",
+      config = function()
+        vim.api.nvim_create_user_command("FixtureMarkCmd", function(ctx)
+          _G.DASH_PAQ_MARK_CAPTURE = { line1 = ctx.line1, line2 = ctx.line2 }
+        end, { range = true })
+      end,
+    },
     {
       dir = dirfixture.new("count", {}),
       name = "count",
@@ -540,11 +586,53 @@ t.describe("a cmd-triggered entry's plugin/ defines the real command with Vimscr
   end)
 end)
 
-t.describe("WHEN the first deferred command has a count beyond the buffer length", function()
-  t.it("SHOULD forward the count without interpreting it as a line range", function()
-    vim.api.nvim_buf_set_lines(0, 0, -1, false, { "one line" })
+t.describe("WHEN the first deferred command has a count", function()
+  t.it("SHOULD forward the count", function()
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, vim.split(string.rep("x\n", 49), "\n"))
     vim.cmd("42FixtureCount")
     t.assert.equals(42, count_received)
+  end)
+end)
+
+t.describe("WHEN a key-triggered plugin's config edits buffers and windows", function()
+  vim.api.nvim_feedkeys(vim.keycode("3<F3>"), "mtx", false)
+
+  t.it("SHOULD run config outside the key stub's textlock", function()
+    t.assert.equals(true, vim.g.bufkeys_config_ok)
+  end)
+
+  t.it("SHOULD replay the key with its count", function()
+    t.assert.equals(3, vim.g.bufkeys_count)
+  end)
+end)
+
+t.describe("WHEN a key stub is pressed with a register and a count", function()
+  vim.api.nvim_feedkeys(vim.keycode('"a2<F4>'), "mtx", false)
+
+  t.it("SHOULD replay both to the loaded mapping", function()
+    t.assert.same({ register = "a", count = 2 }, vim.g.regkeys_seen)
+  end)
+end)
+
+t.describe("WHEN an insert-mode key stub is pressed in an insert started with a count", function()
+  local bufnr = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_set_current_buf(bufnr)
+  vim.api.nvim_feedkeys(vim.keycode("3ifoo<F10><Esc>"), "mtx", false)
+
+  t.it("SHOULD not type the count as text", function()
+    local line = vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)[1]
+    t.assert.falsy(line:find("3", 1, true), line)
+    t.assert.truthy(line:find("fooX", 1, true), line)
+  end)
+end)
+
+t.describe("WHEN the first deferred command gets a visual-mark range", function()
+  t.it("SHOULD forward the marked lines", function()
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { "a", "b", "c", "d" })
+    vim.fn.setpos("'<", { 0, 2, 1, 0 })
+    vim.fn.setpos("'>", { 0, 3, 1, 0 })
+    vim.cmd("'<,'>FixtureMarkCmd")
+    t.assert.same({ line1 = 2, line2 = 3 }, _G.DASH_PAQ_MARK_CAPTURE)
   end)
 end)
 

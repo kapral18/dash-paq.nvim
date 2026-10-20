@@ -87,6 +87,8 @@ local duplicate_provider = dirfixture.new("duplicate_provider", {
   ["plugin/init.lua"] = "vim.g.duplicate_provider_loaded = true",
 })
 local restored_provider = dirfixture.tmp_dir("restored-provider") .. "/later"
+-- An installed deferred Vimscript plugin: its directory exists but has no `lua/`.
+local vimscript_only = dirfixture.new("vimscript_only", { ["plugin/vimscript_only.vim"] = "let g:vimscript_only = 1" })
 local config_only_dependency = dirfixture.new("config-only-dependency", {})
 local config_only_order = {}
 local config_only_manual_calls = 0
@@ -155,6 +157,7 @@ require("dash_paq").setup({
     { dir = primary_provider, name = "primary_provider", lazy = true },
     { dir = duplicate_provider, name = "duplicate_provider", lazy = true },
     { dir = restored_provider, name = "restored_provider", lazy = true },
+    { dir = vimscript_only, name = "vimscript_only", cmd = "VimscriptOnly" },
     { dir = late_link, name = "late_require", lazy = true },
     {
       dir = retry_parent,
@@ -448,6 +451,27 @@ t.describe("WHEN a named entry has no src or dir", function()
     t.assert.truthy(config_only_dependency_seen)
     t.assert.equals(1, config_only_retry_calls)
     t.assert.equals(2, config_only_command_calls)
+  end)
+end)
+
+t.describe("WHEN a deferred plugin without lua/ is installed", function()
+  t.it("SHOULD not rescan it on every require", function()
+    local triggers = require("dash_paq.loader.triggers")
+    local original = triggers.resolve_root
+    local scans = 0
+    triggers.resolve_root = function(entry)
+      if entry.name == "vimscript_only" then
+        scans = scans + 1
+      end
+      return original(entry)
+    end
+    pcall(require, "first_miss_builds_the_map")
+    scans = 0
+    for i = 1, 20 do
+      pcall(require, "missing_module_" .. i)
+    end
+    triggers.resolve_root = original
+    t.assert.equals(0, scans)
   end)
 end)
 

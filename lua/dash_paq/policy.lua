@@ -46,7 +46,10 @@ local function read_tag_dates(path)
   local out = {}
   for _, line in ipairs(vim.split(result.stdout, "\n", { trimempty = true })) do
     local tag, ts = line:match("^(.-)\t(%d+)$")
-    if tag and ts and parse_release_tag(tag) ~= nil then
+    local parsed = tag and parse_release_tag(tag)
+    -- Prereleases sort below their release, so a range pinned from one
+    -- (`v3.0.0-rc1` -> `^3.0`) would match no tag.
+    if ts and parsed and parsed.prerelease == nil then
       out[#out + 1] = { tag = tag, ts = tonumber(ts) or 0 }
     end
   end
@@ -285,11 +288,16 @@ function M.load_version_policy()
   return decoded
 end
 
-function M.write_version_policy(plugins)
+-- `generated_at` starts the TTL clock; partial writes pass the existing one so
+-- adding or invalidating one plugin never postpones re-evaluating the rest.
+function M.write_version_policy(plugins, generated_at)
   if type(plugins) ~= "table" then
     return false
   end
-  return fs.write_json(M.version_policy_path(), { schema = M.SCHEMA, generated_at = os.time(), plugins = plugins })
+  return fs.write_json(
+    M.version_policy_path(),
+    { schema = M.SCHEMA, generated_at = generated_at or os.time(), plugins = plugins }
+  )
 end
 
 -- Returns "fresh" (cache still valid), "full" (expired or schema mismatch,
@@ -356,6 +364,8 @@ local function plan_refresh()
   if mode == "fresh" then
     return { mode = mode, plugins = existing_plugins, pending = {} }
   end
+  -- An incremental refresh keeps the TTL clock; a full one restarts it.
+  local generated_at = mode == "incremental" and existing and existing.generated_at or nil
 
   local plugins = {}
   if mode == "incremental" then
@@ -373,7 +383,7 @@ local function plan_refresh()
       pending[#pending + 1] = item
     end
   end
-  return { mode = mode, plugins = plugins, pending = pending }
+  return { mode = mode, plugins = plugins, pending = pending, generated_at = generated_at }
 end
 
 -- Synchronous refresh for user-initiated paths (`:DashPaq sync`, `status`, `policy-rebuild`)
@@ -391,7 +401,7 @@ function M.refresh_version_policy_if_needed()
     plan.plugins[item.name] = decide_tag_strategy(item.path)
     plan.plugins[item.name].src = item.src
   end
-  return M.write_version_policy(plan.plugins)
+  return M.write_version_policy(plan.plugins, plan.generated_at)
 end
 
 -- Async variant used by the startup bootstrap and after a dashboard apply.
@@ -424,7 +434,7 @@ function M.refresh_version_policy_async(callback)
 
   local plugins, pending = plan.plugins, plan.pending
   if #pending == 0 then
-    local wrote = M.write_version_policy(plugins)
+    local wrote = M.write_version_policy(plugins, plan.generated_at)
     reply(wrote, "no-work")
     return wrote
   end
@@ -441,7 +451,7 @@ function M.refresh_version_policy_async(callback)
     index = index + 1
     if index > #pending then
       policy_refresh_in_progress = false
-      local wrote = M.write_version_policy(plugins)
+      local wrote = M.write_version_policy(plugins, plan.generated_at)
       if callback then
         callback(wrote, plan.mode)
       end
@@ -474,7 +484,7 @@ function M.invalidate_version_policy(name)
       return true
     end
     existing.plugins[name] = nil
-    return M.write_version_policy(existing.plugins)
+    return M.write_version_policy(existing.plugins, existing.generated_at)
   end
   local path = M.version_policy_path()
   if vim.fn.filereadable(path) == 1 then

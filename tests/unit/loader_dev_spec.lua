@@ -154,6 +154,74 @@ t.describe("classifying and resolving the default dir for a dev base", function(
     t.assert.equals(expected, candidates[1].path)
   end)
 
+  -- A `.bare` container with worktrees `aaa` (branch feat; first in
+  -- `git worktree list`) and `zzz` (main, the HEAD branch).
+  local function bare_container(label)
+    local base = dirfixture.tmp_dir(label)
+    local seed = dirfixture.new(label .. "-seed", { ["plugin/init.lua"] = "-- marker" })
+    local function run(args)
+      local result = vim.system(args, { text = true }):wait()
+      assert(result.code == 0, table.concat(args, " ") .. ": " .. tostring(result.stderr))
+    end
+    local identity = { "-c", "user.name=t", "-c", "user.email=t@t.invalid", "-c", "commit.gpgsign=false" }
+    run({ "git", "init", "--quiet", "--initial-branch=main", seed })
+    run(vim.list_extend({ "git", "-C", seed }, vim.list_extend(vim.deepcopy(identity), { "add", "-A" })))
+    run(vim.list_extend({ "git", "-C", seed }, vim.list_extend(vim.deepcopy(identity), { "commit", "-qm", "seed" })))
+    run({ "git", "clone", "--quiet", "--bare", seed, vim.fs.joinpath(base, ".bare") })
+    vim.fn.writefile({ "gitdir: ./.bare" }, vim.fs.joinpath(base, ".git"))
+    run({ "git", "-C", base, "worktree", "add", "--quiet", "-b", "feat", "aaa", "main" })
+    run({ "git", "-C", base, "worktree", "add", "--quiet", "zzz", "main" })
+    return base, seed
+  end
+
+  t.it("container: a .bare layout defaults to the worktree of the repository's HEAD branch", function()
+    local base = bare_container("dev-bare-head")
+    t.assert.equals(vim.uv.fs_realpath(vim.fs.joinpath(base, "zzz")), dev.default_dir(base))
+  end)
+
+  t.it("container: accepts a saved worktree choice when git cannot list worktrees", function()
+    local base, seed = bare_container("dev-bare-unlisted")
+    dirfixture.write(vim.fs.joinpath(base, "notes"), "doc/readme.txt", "not a worktree")
+    local aaa = vim.fs.joinpath(base, "aaa")
+    -- Listing works: the branch must stay off, so only real candidates count.
+    t.assert.is_nil(dev.matching_candidate_path(base, vim.fs.joinpath(base, "notes")))
+
+    -- Old git without `-z`: listing fails.
+    local git = require("dash_paq.git")
+    local orig_run = git.run
+    git.run = function(args, opts)
+      if vim.tbl_contains(args, "worktree") then
+        return {
+          wait = function()
+            return { code = 129, stdout = "", stderr = "unknown switch" }
+          end,
+        }
+      end
+      return orig_run(args, opts)
+    end
+    local results = {}
+    local ok, err = pcall(function()
+      results.aaa = dev.matching_candidate_path(base, aaa)
+      results.outside = dev.matching_candidate_path(base, seed)
+      results.bare = dev.matching_candidate_path(base, vim.fs.joinpath(base, ".bare"))
+      results.notes = dev.matching_candidate_path(base, vim.fs.joinpath(base, "notes"))
+    end)
+    git.run = orig_run
+    assert(ok, err)
+    t.assert.equals(vim.uv.fs_realpath(aaa), results.aaa)
+    t.assert.is_nil(results.outside)
+    t.assert.is_nil(results.bare)
+    t.assert.is_nil(results.notes)
+  end)
+
+  t.it("SHOULD accept a saved choice of the default dir when git cannot list worktrees", function()
+    local base = dirfixture.new("dev-broken-gitdir", { ["lua/broken.lua"] = "return {}" })
+    vim.fn.writefile({ "gitdir: " .. vim.fs.joinpath(base, "no-such-gitdir") }, vim.fs.joinpath(base, ".git"))
+    t.assert.same({}, (dev.candidates_for(base)))
+    local default = dev.default_dir(base)
+    t.assert.equals(vim.uv.fs_realpath(default), dev.matching_candidate_path(base, default))
+  end)
+
   -- a caller's own `GIT_DIR`/`GIT_WORK_TREE` (bare-dotfiles setups,
   -- nvim spawned from a git process) must never redirect these git calls.
   t.it("container resolution ignores an inherited GIT_DIR/GIT_WORK_TREE", function()

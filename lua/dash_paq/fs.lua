@@ -31,7 +31,8 @@ function M.read_json(path)
   if not ok_read or type(lines) ~= "table" or #lines == 0 then
     return nil
   end
-  local ok_decode, decoded = pcall(vim.json.decode, table.concat(lines, "\n"))
+  local ok_decode, decoded =
+    pcall(vim.json.decode, table.concat(lines, "\n"), { luanil = { object = true, array = true } })
   if not ok_decode or type(decoded) ~= "table" then
     return nil
   end

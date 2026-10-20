@@ -17,16 +17,19 @@ Lazy loading and an update dashboard for Neovim's [`vim.pack`](https://neovim.io
 ## Installation
 
 ```lua
-vim.pack.add({ "https://github.com/kapral18/dash-paq.nvim" })
+vim.pack.add({ { src = "https://github.com/kapral18/dash-paq.nvim", version = vim.version.range("*") } })
 
 require("dash_paq").setup({
   spec = { "nvim-mini/mini.icons" },
 })
 ```
 
-Put this in `init.lua`, then restart Neovim and run `:DashPaq`. Call `setup()` once, with `spec`, `modules`,
-or both. The dashboard fetches updates when opened; use `dashboard = { refresh_on_open = false }` to disable
-that fetch. See `:h dash-paq-installation` for startup ordering.
+Put this in `init.lua`, then restart Neovim and run `:DashPaq`. `version` keeps you on tagged releases; while
+dash-paq is 0.x every feature release is a new minor and can break, so pin `vim.version.range("~0.N")` with
+the current minor from the releases page to stay on one line.
+Call `setup()` once, with `spec`, `modules`, or both. The dashboard fetches updates when opened; use
+`dashboard = { refresh_on_open = false }` to disable that fetch. See `:h dash-paq-installation` for startup
+ordering.
 
 ## Spec example
 
@@ -119,7 +122,9 @@ before restarting changes the saved choice. Resolution rules: `:h dash-paq-dev`.
 - The dashboard parses `vim.pack.update()`'s plain-text report; a future Neovim release that changes that format
   can silently break dashboard parsing until this plugin catches up.
 - Differences from lazy.nvim: require-triggered loading is automatic (no `main`/`module` field to opt in), no
-  `import`/`specs`/`pin`/`submodules`/`url` fields, no `VeryLazy`/`User` synthetic startup events.
+  `import`/`specs`/`pin`/`submodules`/`url` fields (list each module in `modules` instead of `import`), and no
+  `VeryLazy` or LazyVim `LazyFile` events; specs using them are reported and load as if the event were not set.
+  Your own `User` events work.
 
 ## Development
 

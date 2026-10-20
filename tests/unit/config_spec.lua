@@ -116,4 +116,60 @@ t.describe("a partial dashboard/version_policy/hosts table is supplied", functio
   end)
 end)
 
+t.describe("WHEN opts have typos or wrong types", function()
+  local function warnings(opts)
+    local notes = {}
+    local original = vim.notify
+    vim.notify = function(msg)
+      notes[#notes + 1] = msg
+    end
+    local resolved = config.setup(opts)
+    vim.wait(100, function()
+      return #notes > 0
+    end)
+    vim.notify = original
+    return resolved, table.concat(notes, "\n")
+  end
+
+  t.it("SHOULD accept a single spec or module string", function()
+    t.assert.same({ "owner/repo" }, config.setup({ spec = "owner/repo" }).spec)
+    t.assert.same({ "plugins" }, config.setup({ modules = "plugins" }).modules)
+  end)
+
+  t.it("SHOULD warn about unknown keys at the top level and in sections", function()
+    local _, warned = warnings({ spec = { "o/r" }, dashbaord = false, dashboard = { heigth_ratio = 0.5 } })
+    t.assert.match("opts%.dashbaord", warned)
+    t.assert.match("opts%.dashboard%.heigth_ratio", warned)
+  end)
+
+  t.it("SHOULD warn about a wrongly typed value and keep its default", function()
+    local resolved, warned = warnings({ spec = { "o/r" }, version_policy = { startup_delay_ms = "200" } })
+    t.assert.match("opts%.version_policy%.startup_delay_ms", warned)
+    t.assert.equals(200, resolved.version_policy.startup_delay_ms)
+  end)
+
+  t.it("SHOULD warn when a section is neither false nor a table", function()
+    local resolved, warned = warnings({ spec = { "o/r" }, dashboard = "x" })
+    t.assert.match("opts%.dashboard", warned)
+    t.assert.equals(0.68, resolved.dashboard.height_ratio)
+  end)
+
+  t.it("SHOULD warn about a host missing compare or commit", function()
+    local resolved, warned = warnings({ spec = { "o/r" }, hosts = { ["gitlab.com"] = { compare = "x/%s...%s" } } })
+    t.assert.match("gitlab%.com", warned)
+    t.assert.is_nil(resolved.hosts["gitlab.com"])
+  end)
+
+  t.it("SHOULD stay quiet for a valid config", function()
+    local _, warned = warnings({ spec = { "o/r" }, dashboard = { margin = 4 }, dev = { patterns = { "^x" } } })
+    t.assert.equals("", warned)
+  end)
+
+  t.it("SHOULD read true for a section as on with the defaults, quietly", function()
+    local resolved, warned = warnings({ spec = { "o/r" }, dashboard = true, dev = true, version_policy = true })
+    t.assert.equals("", warned)
+    t.assert.equals(0.68, resolved.dashboard.height_ratio)
+  end)
+end)
+
 t.finish()

@@ -99,12 +99,7 @@ local function open_float(bufnr, wrap_shift)
   return win
 end
 
--- Extract the leading short hash from a `vim.pack` pending line, e.g.
--- "> f3af041ea9f8 │ chore: bump" -> "f3af041ea9f8", after the popup's
--- indentation. Returns nil for lines without a hash (placeholders, blanks).
-local function pending_line_hash(line)
-  return line:match("^%s*>%s*(%x+)") or line:match("^%s*(%x%x%x%x%x%x%x+)%s")
-end
+local pending_line_hash = fmt.pending_line_hash
 
 function M.close_details(ctx)
   if ctx.details_winid and vim.api.nvim_win_is_valid(ctx.details_winid) then

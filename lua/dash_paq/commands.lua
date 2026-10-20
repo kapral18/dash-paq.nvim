@@ -19,11 +19,11 @@ local subcommands = {}
 local default = nil
 local created = false
 
--- Keeps candidates that contain `arglead`, sorted.
+-- Keeps candidates that start with `arglead`, sorted.
 function M.filter(candidates, arglead)
   local out = {}
   for _, c in ipairs(candidates) do
-    if arglead == "" or c:find(arglead, 1, true) then
+    if c:sub(1, #arglead) == arglead then
       out[#out + 1] = c
     end
   end
@@ -71,7 +71,9 @@ end
 -- Neovim supplies the whole command line and a byte offset for the cursor.
 function M.complete(arglead, cmdline, cursorpos)
   cmdline = cmdline:sub(1, cursorpos or #cmdline)
-  local rest = cmdline:match("^%s*" .. COMMAND .. "!?%s+(.*)$")
+  -- Anywhere in the line, so `:silent DashPaq` and abbreviations from `:DashP`
+  -- on complete too.
+  local rest = cmdline:match("%f[%w]DashP%a*!?%s+(.*)$")
   if not rest then
     return {}
   end

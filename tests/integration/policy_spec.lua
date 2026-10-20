@@ -69,4 +69,49 @@ t.describe("WHEN a synchronous rebuild supersedes an asynchronous refresh", func
   end)
 end)
 
+t.describe("WHEN a plugin's newest tag is a prerelease", function()
+  t.it("SHOULD pin a range that a release tag satisfies", function()
+    local pre = fixture.new_remote("prerelease")
+    fixture.commit(pre, "fix: initial", { ["README.md"] = "1" })
+    fixture.tag(pre, "v2.2.0")
+    fixture.commit(pre, "feat: next", { ["next.txt"] = "2" })
+    fixture.tag(pre, "v3.0.0-rc1")
+    fixture.push(pre)
+    vim.pack.add({ { src = pre.src, name = "prerelease" } }, { confirm = false, load = false })
+    policy.rebuild_version_policy("prerelease")
+    local decision = policy.load_version_policy().plugins.prerelease
+    t.assert.equals("v2.2.0", decision.latest_tag)
+    local range =
+      spec.resolve_entry_version({ name = "prerelease", src = pre.src, specs = { {} } }, policy.load_version_policy())
+    t.assert.truthy(range and range:has("v2.2.0"), vim.inspect(decision))
+  end)
+end)
+
+t.describe("WHEN the policy is updated for only some plugins", function()
+  local fs = require("dash_paq.fs")
+  local two_days_ago = os.time() - 2 * 24 * 60 * 60
+
+  t.it("SHOULD keep the TTL clock of an incremental refresh", function()
+    fs.write_json(policy.version_policy_path(), {
+      schema = policy.SCHEMA,
+      generated_at = two_days_ago,
+      plugins = { policy = { src = remote.src, strategy = "branch" } },
+    })
+    policy.refresh_version_policy_if_needed()
+    local after = policy.load_version_policy()
+    t.assert.truthy(after.plugins.prerelease, "the missing plugin was added")
+    t.assert.equals(two_days_ago, after.generated_at)
+  end)
+
+  t.it("SHOULD keep the TTL clock when one plugin is invalidated", function()
+    fs.write_json(policy.version_policy_path(), {
+      schema = policy.SCHEMA,
+      generated_at = two_days_ago,
+      plugins = { policy = { src = remote.src, strategy = "branch" }, prerelease = { strategy = "branch" } },
+    })
+    policy.invalidate_version_policy("prerelease")
+    t.assert.equals(two_days_ago, policy.load_version_policy().generated_at)
+  end)
+end)
+
 t.finish()

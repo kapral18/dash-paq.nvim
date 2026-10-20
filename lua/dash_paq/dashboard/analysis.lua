@@ -25,12 +25,13 @@ local function infer_breaking_status(p_data)
 
   -- A label that is not a full version (a branch, like vim.pack's `(main)` or
   -- `(v2)`) gives way to the tag on that revision, so a tagged tip still yields
-  -- a semver delta.
+  -- a semver delta; with no tag, nil, so the row shows the commit rather than
+  -- a moving branch name.
   local function version_at(label, rev)
     if label and label:match("^v?%d+%.%d+%.%d+") then
       return label
     end
-    return gitcmd.tag_on_revision(p_data.path, rev) or label
+    return gitcmd.tag_on_revision(p_data.path, rev)
   end
   local before_version = version_at(p_data.current_version, p_data.rev_before)
   local after_version = version_at(p_data.target_version, p_data.rev_after)

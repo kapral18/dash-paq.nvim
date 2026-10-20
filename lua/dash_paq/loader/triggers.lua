@@ -237,13 +237,55 @@ function M.new(opts)
     end
   end
 
-  local function make_rhs(entry_name, key, load_entry)
+  -- `expr` stubs (operator-pending only) keep the operator and count pending
+  -- for the replay, but load under textlock. Other stubs are plain callbacks,
+  -- so `config()` may edit buffers and open windows; their count is consumed by
+  -- the mapping and replayed in front of `lhs`.
+  local function make_rhs(entry_name, key, load_entry, expr)
     return function()
+      -- A plain stub consumed the register and count typed before it; read
+      -- them before loading. Only Normal/Visual keys take them: a count left
+      -- over from `3i` must not be typed as text.
+      local prefix = ""
+      if not expr and vim.api.nvim_get_mode().mode:match("^[nvV\22]") then
+        local clipboard = vim.o.clipboard
+        local default_register = clipboard:find("unnamedplus", 1, true) and "+"
+          or clipboard:find("unnamed", 1, true) and "*"
+          or '"'
+        if vim.v.register ~= default_register then
+          prefix = '"' .. vim.v.register
+        end
+        if vim.v.count > 0 then
+          prefix = prefix .. vim.v.count
+        end
+      end
       if not load_entry(entry_name, "key:" .. tostring(key.lhs)) then
         return
       end
-      local feed = vim.api.nvim_replace_termcodes("<Ignore>" .. key.lhs, true, true, true)
+      local feed = vim.api.nvim_replace_termcodes("<Ignore>" .. prefix .. key.lhs, true, true, true)
       vim.api.nvim_feedkeys(feed, "i", false)
+    end
+  end
+
+  -- Operator-pending modes get an `expr` stub; every other mode a plain one.
+  -- `""` is `:map`'s Normal, Visual, Select and Operator-pending.
+  local function set_stub(entry_name, key, load_entry, opts_for)
+    local modes = type(key.mode) == "table" and key.mode or { key.mode or "n" }
+    local pending, plain = {}, {}
+    for _, mode in ipairs(modes) do
+      if mode == "" then
+        vim.list_extend(plain, { "n", "v" })
+        pending[#pending + 1] = "o"
+      else
+        local list = mode == "o" and pending or plain
+        list[#list + 1] = mode
+      end
+    end
+    if #plain > 0 then
+      vim.keymap.set(plain, key.lhs, make_rhs(entry_name, key, load_entry, false), opts_for(false))
+    end
+    if #pending > 0 then
+      vim.keymap.set(pending, key.lhs, make_rhs(entry_name, key, load_entry, true), opts_for(true))
     end
   end
 
@@ -281,18 +323,41 @@ function M.new(opts)
     })
   end
 
+  -- Modes `vim.keymap.set` accepts; checked up front so an invalid key fails
+  -- once at registration, never per buffer or after half its modes are mapped.
+  local KEY_MODES = {
+    [""] = true,
+    n = true,
+    v = true,
+    x = true,
+    s = true,
+    o = true,
+    i = true,
+    c = true,
+    t = true,
+    l = true,
+    ["!"] = true,
+  }
+
   function self.map_key_trigger(entry_name, key, load_entry)
     local base_opts = key.opts or {}
+    for _, mode in ipairs(type(key.mode) == "table" and key.mode or { key.mode or "n" }) do
+      if not KEY_MODES[mode] then
+        error(string.format("invalid mode %s", vim.inspect(mode)), 0)
+      end
+    end
 
-    -- `expr = true`, returns nothing: without it an operator-pending
-    -- lhs-only mapping cancels its operator instead of surviving for the replay below.
+    -- `expr`: without it an operator-pending lhs-only mapping cancels its
+    -- operator instead of surviving for the replay (see `make_rhs`).
     local function stub_opts(buf)
-      return {
-        desc = base_opts.desc,
-        nowait = base_opts.nowait,
-        expr = true,
-        buffer = buf,
-      }
+      return function(expr)
+        return {
+          desc = base_opts.desc,
+          nowait = base_opts.nowait,
+          expr = expr,
+          buffer = buf,
+        }
+      end
     end
 
     if key.ft then
@@ -304,7 +369,7 @@ function M.new(opts)
           return
         end
         mapped[buf] = true
-        vim.keymap.set(key.mode, key.lhs, make_rhs(entry_name, key, load_entry), stub_opts(buf))
+        set_stub(entry_name, key, load_entry, stub_opts(buf))
         t.keys[#t.keys + 1] = { mode = key.mode, lhs = key.lhs, buf = buf }
       end
       for _, buf in ipairs(vim.api.nvim_list_bufs()) do
@@ -321,7 +386,7 @@ function M.new(opts)
       })
       t.autocmd_ids[#t.autocmd_ids + 1] = id
     else
-      vim.keymap.set(key.mode, key.lhs, make_rhs(entry_name, key, load_entry), stub_opts(nil))
+      set_stub(entry_name, key, load_entry, stub_opts(nil))
       local t = triggers_for(entry_name)
       t.keys[#t.keys + 1] = { mode = key.mode, lhs = key.lhs }
     end
@@ -362,7 +427,6 @@ function M.new(opts)
       nargs = "*",
       bang = true,
       range = true,
-      addr = "other",
       desc = "Load plugin and execute " .. cmd_name,
     })
   end

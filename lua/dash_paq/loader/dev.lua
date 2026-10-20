@@ -152,7 +152,8 @@ end
 function M.list_worktrees(git_dir)
   local result = run_git({ "worktree", "list", "--porcelain", "-z" }, git_dir)
   if not result or result.code ~= 0 then
-    return {}
+    -- Second value: git could not list them (as opposed to listing none).
+    return {}, true
   end
   local out = {}
   for _, entry in ipairs(M.parse_worktree_porcelain(result.stdout)) do
@@ -177,7 +178,8 @@ function M.candidates_for(base)
     local normalized = fs.real_path(base)
     return { { path = normalized, label = normalized } }, kind
   end
-  return M.list_worktrees(git_dir), kind
+  local worktrees, failed = M.list_worktrees(git_dir)
+  return worktrees, kind, failed
 end
 
 -- Runtime subdirectories Neovim sources from a plugin root. A dev dir holding
@@ -214,8 +216,10 @@ function M.is_plugin_dir(path)
 end
 
 -- The dev dir to use when no saved choice (or an invalid one) applies.
--- "worktree"/"plain": `base` itself, as spelled. "container": the first
--- non-bare worktree of its git child/self. nil when `base` doesn't exist.
+-- "worktree"/"plain": `base` itself, as spelled. "container": the worktree
+-- on the repository's HEAD branch (a bare repo lists worktrees by path, so
+-- the first one is arbitrary), else the first non-bare worktree. nil when
+-- `base` doesn't exist.
 function M.default_dir(base)
   local kind, git_dir = M.classify_base(base)
   if kind == "missing" then
@@ -223,6 +227,13 @@ function M.default_dir(base)
   end
   if kind == "container" then
     local worktrees = M.list_worktrees(git_dir)
+    local head = run_git({ "symbolic-ref", "--quiet", "--short", "HEAD" }, git_dir)
+    local head_branch = head and head.code == 0 and vim.trim(head.stdout or "") or nil
+    for _, worktree in ipairs(worktrees) do
+      if head_branch and worktree.branch == head_branch then
+        return worktree.path
+      end
+    end
     return worktrees[1] and worktrees[1].path or nil
   end
   -- Loaded as spelled (only `~` expanded) so the rtp entry matches the
@@ -234,17 +245,37 @@ end
 -- only when it names -- after normalization -- one of `base`'s *current*
 -- candidate checkouts, not merely any existing directory. This stops a
 -- stale `L`-toggle choice from silently overriding a base that a spec
--- change has since pointed elsewhere. Returns the matching candidate's
--- normalized path, or nil when `choice` doesn't match any candidate.
+-- change has since pointed elsewhere. The default checkout always counts,
+-- and so does a plugin checkout directly inside a container whose worktrees
+-- git cannot list. Returns the matching normalized path, or nil.
 function M.matching_candidate_path(base, choice)
   local normalized_choice = fs.real_path(choice)
   if not normalized_choice then
     return nil
   end
-  for _, candidate in ipairs(M.candidates_for(base)) do
+  local candidates, kind, listing_failed = M.candidates_for(base)
+  for _, candidate in ipairs(candidates) do
     if candidate.path == normalized_choice then
       return candidate.path
     end
+  end
+  -- The default checkout is always valid, even when git cannot list
+  -- worktrees (a broken `gitdir:` pointer, an untrusted repo).
+  local default = M.default_dir(base)
+  if default and fs.real_path(default) == normalized_choice then
+    return normalized_choice
+  end
+  -- A container whose worktrees git cannot list: a plugin checkout directly
+  -- inside it with its own `.git` (every linked worktree has one) is still
+  -- one of its worktrees.
+  if
+    kind == "container"
+    and listing_failed
+    and vim.fs.dirname(normalized_choice) == fs.real_path(base)
+    and vim.uv.fs_stat(vim.fs.joinpath(normalized_choice, ".git")) ~= nil
+    and M.is_plugin_dir(normalized_choice)
+  then
+    return normalized_choice
   end
   return nil
 end

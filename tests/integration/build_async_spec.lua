@@ -75,7 +75,7 @@ local init_lines = {
   "    local function failed_notified()",
   "      for _, n in ipairs(notified) do",
   "        if n.level == vim.log.levels.ERROR and type(n.msg) == 'string'",
-  "          and n.msg:match('^Build shell command failed %(sleep 0.6; exit 7%)') then return true end",
+  "          and n.msg:match('^[%w_.-]+: build failed %(sleep 0.6; exit 7%)') then return true end",
   "      end",
   "      return false",
   "    end",

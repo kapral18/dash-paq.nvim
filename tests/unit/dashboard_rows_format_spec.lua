@@ -192,8 +192,23 @@ t.describe("writing a row note", function()
     t.assert.equals("possibly breaking", fmt.note_cell({ status = "update", breaking = true }))
   end)
 
-  t.it("leaves other update rows and up-to-date rows blank", function()
-    t.assert.equals("", fmt.note_cell({ status = "update", breaking = false }))
+  t.it("gives an update row its size: the semver step, else the commit count", function()
+    t.assert.equals("minor release", fmt.note_cell({ status = "update", breaking = false, semver_delta = "minor" }))
+    t.assert.equals("patch release", fmt.note_cell({ status = "update", semver_delta = "patch" }))
+    local pending = "> 1a2b3c4d │ feat: a\n> 5e6f7a8b │ fix: b\n> 9c0d1e2f │ fix: c"
+    t.assert.equals("3 commits", fmt.note_cell({ status = "update", pending_updates = pending }))
+    t.assert.equals("1 commit", fmt.note_cell({ status = "update", pending_updates = "> 1a2b3c4d │ feat: a" }))
+  end)
+
+  t.it("calls a move to a lower version or back over commits a downgrade", function()
+    t.assert.equals(
+      "downgrade",
+      fmt.note_cell({ status = "update", semver_delta = "minor", current_version = "v1.2.0", target_version = "v1.1.0" })
+    )
+    t.assert.equals("downgrade", fmt.note_cell({ status = "update", pending_updates = "< 1a2b3c4d │ feat: a" }))
+  end)
+
+  t.it("leaves an update with nothing known and up-to-date rows blank", function()
     t.assert.equals("", fmt.note_cell({ status = "update" }))
     t.assert.equals("", fmt.note_cell({ status = "same" }))
   end)
@@ -369,6 +384,19 @@ t.describe("WHEN the dashboard header renders", function()
     local header, c, groups = render_header(120, nil, 8)
     local first = vim.api.nvim_buf_get_lines(c.bufnr, #header, #header + 1, false)[1]
     t.assert.equals(require("dash_paq.dashboard.ui.render").status_hl.error, groups[first:find("failed") - 1])
+  end)
+
+  t.it("SHOULD dim an update's size note and warn only for a possible break", function()
+    local header, c, groups = render_header(120, function(c)
+      c.rows = { { name = "sized", status = "update", semver_delta = "minor" } }
+    end, 8)
+    local first = vim.api.nvim_buf_get_lines(c.bufnr, #header, #header + 1, false)[1]
+    t.assert.equals("DashPaqMeta", groups[first:find("minor release", 1, true) - 1])
+    local header2, c2, groups2 = render_header(120, function(c)
+      c.rows = { { name = "risky", status = "update", breaking = true } }
+    end, 8)
+    local row = vim.api.nvim_buf_get_lines(c2.bufnr, #header2, #header2 + 1, false)[1]
+    t.assert.equals("DashPaqRiskBreak", groups2[row:find("possibly breaking", 1, true) - 1])
   end)
 
   t.it("SHOULD keep every count when large counts need narrower gaps", function()

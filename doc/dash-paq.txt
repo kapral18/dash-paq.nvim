@@ -49,7 +49,9 @@ dash-paq.nvim adds lazy loading and an update dashboard to |vim.pack|:
 
 Bootstrap with |vim.pack.add()| like any plugin, then call
 `setup()`: >lua
-    vim.pack.add({ "https://github.com/kapral18/dash-paq.nvim" })
+    vim.pack.add({
+      { src = "https://github.com/kapral18/dash-paq.nvim", version = vim.version.range("*") },
+    })
 
     require("dash_paq").setup({
       spec = {
@@ -57,6 +59,11 @@ Bootstrap with |vim.pack.add()| like any plugin, then call
       },
     })
 <
+`version` keeps you on tagged releases. While dash-paq.nvim is 0.x every
+feature release is a new minor and a minor release can break, so
+`vim.version.range("~0.N")` with the current minor (see the releases
+page) stays on one line.
+
 There is no `plugin/` directory: every command registers inside
 `setup()`, called once from `init.lua`, during startup. It never
 disables 'loadplugins' or takes over the native |load-plugins| step; it
@@ -137,14 +144,20 @@ Supported fields:
                    pins from other specs; otherwise the last pin wins.
   `commit`/`tag`/`branch`
                    Explicit pin; priority over `version`.
-  `enabled`/`cond` Boolean or function; any false among merged specs
-                   disables it.
+  `enabled`/`cond` Boolean or `fn(spec)`; any false among merged specs
+                   disables it. A function that throws is reported and
+                   counts as false.
   `optional`       Disabled unless at least one merged spec isn't
                    `optional`.
   `dependencies`   `owner/repo` strings or spec tables, loaded before
                    the entry; cycles silently cut.
-  `init`           `init(spec)`, at setup time, before install.
-  `build`          Function, `":Ex command"` string, or shell command
+  `init`           `init(plugin)`, at setup time, before install. As in
+                   lazy.nvim, `init`/`build`/`config` get `plugin`: the
+                   spec with `name` and the plugin's `dir` filled in
+                   (`dir` is nil before the first install); `opts`/
+                   `keys`/`cond`/`enabled` functions get the same
+                   `plugin`, with `dir` once known.
+  `build`          `fn(plugin)`, `":Ex command"` string, or shell command
                    (`/bin/sh -c`, plugin's path), on `PackChanged`
                    install/update. A deferred entry loads first so build
                    acts on the real plugin; during `init.lua` sourcing,
@@ -152,23 +165,36 @@ Supported fields:
                    `VimEnter`.
   `opts`           Table (deep-merged across specs) or `fn(spec, opts)`
                    returning a replacement table.
-  `config`         `fn(spec, opts)`. With no `config` function,
+  `config`         `fn(plugin, opts)`. With no `config` function,
                    `setup(opts)` auto-calls, only when a spec supplied
                    `opts` or `config = true`, on the first of: `name`,
-                   `name` minus one `.nvim`/`.vim`/`nvim-`/`vim-` affix,
-                   or `name` with `-` -> `_` — whichever `require()`s
-                   and has a `setup` function.
-  `keys`           Table, or `fn(spec)` returning a key list; entries: `lhs`/`[1]`,
+                   `name` minus one `.nvim`/`.vim`/`nvim-`/`vim-`/
+                   `.lua`/`-lua` affix, or `name` with `-` -> `_` —
+                   whichever `require()`s and has a `setup` function.
+                   If none does, it warns; if one fails to load, it
+                   reports that error.
+  `keys`           String, table, or `fn(plugin)` returning a key list;
+                   entries: an lhs string, or a table with `lhs`/`[1]`,
                    `rhs`/`[2]`, `mode` (default `"n"`),
                    `ft`/`desc`/`expr`/`nowait`/`silent`, `noremap`/`remap`,
                    `enabled`. A known `rhs` becomes a real mapping on
                    load, any route. `lhs`-only: loads the plugin,
-                   replays `lhs` into its own mapping.
+                   replays `lhs` into its own mapping, with the register
+                   and count typed before it in Normal/Visual mode. In
+                   `o` mode (also part of `""`) the load runs under
+                   textlock, so that plugin's `config()` cannot change
+                   buffers or windows.
   `cmd`            String/list of command names, deferring load until
                    first use; forwards `<bang>`/range/count/`<mods>`/args.
-                   The loaded command validates the numeric prefix.
-  `event`          String, `{ event = "User", pattern = "Ready" }`, or a
-                   list; defers load until fired. After loading, the
+                   Before the first load a range is read as lines, so
+                   marks like `'<,'>` work and a count must not exceed
+                   the buffer's line count.
+  `event`          String (`"BufEnter"`, or `"BufEnter *.lua"` with a
+                   pattern), `{ event = "User", pattern = "Ready" }`
+                   (`event` may be a list), or a list of these; defers
+                   load until fired. An event Neovim does
+                   not know is reported and skipped; the plugin loads as
+                   if it were not set. After loading, the
                    event replays only in augroups that had no handler
                    for it before loading. Replay preserves the match
                    and buffer context; no augroup, no replay.
@@ -196,15 +222,22 @@ becomes available.
 Unsupported fields                                 *dash-paq-spec-unsupported*
 
 Not read by dash-paq.nvim: `main`/`module`/`import`/`specs`/`pin`/
-`submodules`/`url`, and lazy.nvim's synthetic `VeryLazy`/`User` startup
-events (`event = "User"` with your own `pattern` still works;
-lazy.nvim's own firing isn't replicated).
+`submodules`/`url`. A spec with `import` is reported; list each
+module it would import (e.g. `plugins.editor`) in `opts.modules` instead.
+lazy.nvim's `VeryLazy` and LazyVim's `LazyFile` (bare or as `User`
+patterns) are reported and skipped, since nothing fires them here; the
+plugin loads as if they were not set. `event = "User"` with your own
+`pattern` still works. Nested lists of specs are flattened.
 
 ==============================================================================
 6. Configuration                                             *dash-paq-config*
 
 `opts.dashboard`, `opts.version_policy`, `opts.dev` each accept `false`
-to disable, or a table deep-merged over the defaults below.
+to disable, `true` for the defaults, or a table deep-merged over the
+defaults below. `setup()`
+warns once about unknown keys, values of the wrong type (those keep their
+default), and hosts missing `compare` or `commit`. `opts.spec` and
+`opts.modules` also accept a single string.
 
 dashboard                                          *dash-paq-config-dashboard*
 >lua
@@ -404,9 +437,13 @@ selection.
 
 Below the header, the table titles its columns `Plugin`, `Version`, and
 `Note`. Each row shows a selection box, the status icon, the plugin, its
-version (`current -> target` for an update), and a note in words for
-rows that need attention: `possibly breaking`, `drifted from spec`,
-`non-release tag`, `not in spec`, `failed`, `not checked`. `?`
+version (`current -> target` for an update; a branch-tracking update
+shows the target's tag, else its commit), and a note in words. An update's
+note is its size (`minor release`/`patch release`, or `12 commits` when
+either end has no version), `downgrade` when it moves to a lower version or
+only reverts commits, or `possibly breaking`; other rows that need attention say
+`drifted from spec`, `non-release tag`, `not in spec`, `failed`, or
+`not checked`. `?`
 lists what each icon means. Breaking signals come from versions and
 commit messages, not compatibility tests.
 Use |:DashPaq-stats| for the last check counts and check/apply times.
@@ -422,7 +459,9 @@ under |dash-paq-state|, re-evaluating once per `ttl_days` (default
 per tick) or sync on |:DashPaq-sync|/|:DashPaq-status|/
 |:DashPaq-policy-rebuild|. A decision takes effect at the next
 startup's `setup()` call, not immediately; the first time a policy is
-generated, dash-paq.nvim notifies "restart to apply tag pins".
+generated, dash-paq.nvim notifies "restart to apply tag pins". A policy
+written by an older release is ignored and rebuilt the same way, with the
+same notice.
 
 With no semver-shaped tags, the policy selects `branch`. When the branch
 tip is at the latest tag, it selects `tags`.
@@ -444,9 +483,10 @@ With at least `min_tags` tags, it selects `branch` when any of these holds:
 
 Otherwise, it selects `tags`.
 
-A `tags` decision resolves to a caret/tilde range from the latest tag
-(`^MAJOR.0` for `MAJOR >= 1`, else `~0.MINOR`), so `vim.pack` resolves
-the greatest matching tag itself on every install/update.
+A `tags` decision resolves to a caret/tilde range from the latest release
+tag: `^MAJOR.0` for `MAJOR >= 1`, else `~0.MINOR`. `vim.pack` then resolves
+the greatest matching tag itself on every install/update. Prerelease tags
+are skipped, since a range built from one matches no tag.
 
 Defaults: |dash-paq-config-version_policy|. Tag parsing is strict
 MAJOR.MINOR.PATCH semver (matching `vim.pack` 0.12.4's own resolution);
@@ -479,8 +519,9 @@ The base is then resolved:
     repo: loads the base itself, as a git work tree.
   - Base has no `.git` but an immediate child directory does, or its `.git`
     file resolves to a bare repo (a `.bare`-backed worktree layout: a
-    "container" of worktrees either way): loads the first non-bare
-    `git worktree list` entry (the main worktree).
+    "container" of worktrees either way): loads the worktree on the
+    repository's HEAD branch, else the first non-bare `git worktree list`
+    entry.
   - Base exists and isn't git at all: loads the base itself, unchanged.
   - Base missing, or an existing directory with no plugin content (none
     of `lua/`, `plugin/`, `after/`, `ftplugin/`, `colors/`, `doc/`, ...):

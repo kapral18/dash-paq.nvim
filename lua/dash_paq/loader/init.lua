@@ -123,7 +123,9 @@ local function process_shell_queue()
     -- notify/UI state or resuming the (possibly ex-command/API-calling) next build.
     vim.schedule(function()
       if result.code ~= 0 then
-        notify_err("Build shell command failed (" .. item.build .. "): " .. ((result.stderr or "exit ") .. result.code))
+        notify_err(
+          item.name .. ": build failed (" .. item.build .. "): " .. ((result.stderr or "exit ") .. result.code)
+        )
       end
       shell_build_running = false
       item.on_done()
@@ -136,16 +138,18 @@ local function process_shell_queue()
   end
 end
 
+local plugin_view = spec_mod.plugin_view
+
 -- Runs one build and calls `on_done` exactly once, whether it succeeded,
 -- failed, or was a no-op. Shell-string builds are queued (see above);
 -- function and ":ex" builds still run synchronously, inline.
-local function run_build(build, path, on_done)
+local function run_build(name, build, path, on_done, spec)
   on_done = on_done or function() end
 
   if type(build) == "function" then
-    local ok, err = pcall(build)
+    local ok, err = pcall(build, plugin_view(name, spec, path))
     if not ok then
-      notify_err("Build function failed: " .. tostring(err))
+      notify_err(name .. ": build failed: " .. tostring(err))
     end
     on_done()
     return
@@ -159,30 +163,50 @@ local function run_build(build, path, on_done)
   if build:sub(1, 1) == ":" then
     local ok, err = pcall(vim.cmd --[[@as fun(cmd: string)]], build:sub(2))
     if not ok then
-      notify_err("Build ex-command failed (" .. build .. "): " .. tostring(err))
+      notify_err(name .. ": build failed (" .. build .. "): " .. tostring(err))
     end
     on_done()
     return
   end
 
-  shell_build_queue[#shell_build_queue + 1] = { build = build, path = path, on_done = on_done }
+  shell_build_queue[#shell_build_queue + 1] = { name = name, build = build, path = path, on_done = on_done }
   process_shell_queue()
 end
+
+-- Events lazy.nvim/LazyVim fire themselves; nothing fires them here, so a
+-- trigger on one would never load its plugin.
+local LAZY_EVENTS = {
+  verylazy = "VeryLazy is fired by lazy.nvim, not Neovim; use UIEnter or VimEnter",
+  lazyfile = 'LazyFile is LazyVim\'s; use { "BufReadPost", "BufNewFile", "BufWritePre" }',
+}
 
 local function run_auto_setup(entry, opts)
   if type(opts) ~= "table" then
     return
   end
-  for _, mod_name in ipairs(spec_mod.derive_module_candidates(entry)) do
+  local candidates = spec_mod.derive_module_candidates(entry)
+  for _, mod_name in ipairs(candidates) do
     local ok_mod, mod = pcall(require, mod_name)
     if ok_mod and type(mod) == "table" and type(mod.setup) == "function" then
       local ok_setup, err = pcall(mod.setup, opts)
       if not ok_setup then
-        notify_err("Failed setup() for " .. entry.name .. ": " .. tostring(err))
+        notify_err(entry.name .. ": setup() failed: " .. tostring(err))
       end
       return
     end
+    -- A candidate that exists but fails to load is the plugin's own error,
+    -- not a wrong guess: report it instead of dropping the opts silently.
+    if not ok_mod and not tostring(mod):find("module '" .. mod_name .. "' not found", 1, true) then
+      notify_err(entry.name .. ": loading " .. mod_name .. " for setup() failed: " .. tostring(mod))
+      return
+    end
   end
+  notify_warn(
+    entry.name
+      .. ": no module with setup() found for opts/config = true (tried: "
+      .. table.concat(candidates, ", ")
+      .. "); use config = function(_, opts) ... end"
+  )
 end
 
 -- Resolve saved dev choices once, independently of dashboard settings.
@@ -199,6 +223,10 @@ local function resolve_dev_entries(entries, dev_cfg)
   local choices = dev_mod.load_choices()
 
   for _, entry in pairs(entries) do
+    -- Disabled by `cond`/`enabled`: it never loads, so no dev path to resolve.
+    if entry.is_dev and not entry.enabled then
+      entry.is_dev = false
+    end
     if entry.is_dev then
       local base = dev_mod.base_dir_for(entry, dev_cfg)
       dev_capable[entry.name] = { base = base, has_src = entry.src ~= nil }
@@ -320,9 +348,31 @@ local function install_specs(pack_specs)
     end
   end
   if #unchanged > 0 then
-    local ok, err = pcall(vim.pack.add, unchanged, { confirm = false, load = function() end })
-    if not ok then
-      notify_err("vim.pack.add failed during install: " .. tostring(err))
+    -- `vim.pack.add` validates the whole list before installing anything, so
+    -- one invalid spec would block every install: check each the same way
+    -- (vim/pack.lua `normalize_spec`) and report it by name.
+    local valid = {}
+    for _, pack_spec in ipairs(unchanged) do
+      local version = pack_spec.version
+      local problem = (type(pack_spec.src) ~= "string" or pack_spec.src == "") and "src must be a non-empty string"
+        or (pack_spec.name ~= nil and (type(pack_spec.name) ~= "string" or pack_spec.name == "")) and "name must be a non-empty string"
+        or (
+            version ~= nil
+            and type(version) ~= "string"
+            and not (type(version) == "table" and pcall(version.has, version, "1"))
+          )
+          and "version must be a string or vim.VersionRange, got " .. vim.inspect(version)
+      if problem then
+        notify_err(tostring(pack_spec.name) .. ": invalid spec: " .. problem)
+      else
+        valid[#valid + 1] = pack_spec
+      end
+    end
+    if #valid > 0 then
+      local ok, err = pcall(vim.pack.add, valid, { confirm = false, load = function() end })
+      if not ok then
+        notify_err("vim.pack.add failed during install: " .. tostring(err))
+      end
     end
   end
   if #replaced > 0 then
@@ -365,8 +415,6 @@ function M.setup(config, dashboard)
     dev = config.dev,
   })
 
-  local dev_plugin_paths, dev_capable = resolve_dev_entries(entries, config.dev)
-
   for _, entry in pairs(entries) do
     local has_required = false
     for _, spec in ipairs(entry.specs) do
@@ -379,6 +427,9 @@ function M.setup(config, dashboard)
       entry.enabled = false
     end
   end
+
+  -- After every gate, so a disabled entry never resolves a dev path.
+  local dev_plugin_paths, dev_capable = resolve_dev_entries(entries, config.dev)
 
   local sorted = spec_mod.ordered_entries(entries)
 
@@ -393,15 +444,15 @@ function M.setup(config, dashboard)
     if entry.enabled then
       for _, spec in ipairs(entry.specs) do
         if type(spec.init) == "function" then
-          local ok, err = pcall(spec.init, spec)
+          local ok, err = pcall(spec.init, plugin_view(entry.name, spec, triggers_mod.resolve_root(entry)))
           if not ok then
-            notify_err("init() failed for " .. entry.name .. ": " .. tostring(err))
+            notify_err(entry.name .. ": init() failed: " .. tostring(err))
           end
         end
 
         if spec.build ~= nil and not entry.is_dev then
           build_hooks[entry.name] = build_hooks[entry.name] or {}
-          build_hooks[entry.name][#build_hooks[entry.name] + 1] = spec.build
+          build_hooks[entry.name][#build_hooks[entry.name] + 1] = { build = spec.build, spec = spec }
         end
       end
 
@@ -468,16 +519,75 @@ function M.setup(config, dashboard)
           end
         end
 
+        -- lazy.nvim's forms: "Event", "Event pattern", { "A", "B" },
+        -- { event = "A" | { "A", "B" }, pattern = ... }.
+        local event_items = {}
+        if type(spec.event) == "table" and next(spec.event) == nil then
+          notify_err(entry.name .. ": empty event list (skipped)")
+        end
         for _, ev in ipairs(spec_mod.as_list(spec.event)) do
-          local ev_name, ev_pattern
-          if type(ev) == "string" then
-            ev_name = ev
-          elseif type(ev) == "table" then
-            ev_name = ev.event or ev[1]
-            ev_pattern = ev.pattern
+          if type(ev) == "table" then
+            local names = ev.event ~= nil and spec_mod.as_list(ev.event) or ev
+            if #names == 0 then
+              notify_err(entry.name .. ": event table has no event name (skipped)")
+            end
+            for _, name in ipairs(names) do
+              event_items[#event_items + 1] = { name = name, pattern = ev.pattern }
+            end
+          else
+            event_items[#event_items + 1] = { name = ev }
+          end
+        end
+        for _, item in ipairs(event_items) do
+          local ev_name, ev_pattern = item.name, item.pattern
+          if type(ev_name) ~= "string" or ev_name == "" then
+            notify_err(entry.name .. ": event " .. vim.inspect(ev_name) .. " is not a name (skipped)")
+            ev_name = nil
+          end
+          -- lazy.nvim's "Event pattern" shorthand, in either form.
+          if type(ev_name) == "string" and ev_pattern == nil then
+            local name, pattern = ev_name:match("^(%S+)%s+(.-)%s*$")
+            ev_name, ev_pattern = name or ev_name, pattern
           end
           if type(ev_name) == "string" and ev_name ~= "" then
-            local key = ev_name .. "\0" .. tostring(ev_pattern or "")
+            local foreign = LAZY_EVENTS[ev_name:lower()]
+            local all_lazy = false
+            if ev_name:lower() == "user" and ev_pattern ~= nil then
+              -- Drop only the lazy.nvim patterns; the user's own still trigger.
+              local kept, dropped = {}, 0
+              for _, pattern in ipairs(spec_mod.as_list(ev_pattern)) do
+                local lazy = type(pattern) == "string" and LAZY_EVENTS[pattern:lower()]
+                if lazy then
+                  dropped = dropped + 1
+                  notify_err(entry.name .. ": event " .. lazy .. " (skipped; the plugin loads as if it were not set)")
+                else
+                  kept[#kept + 1] = pattern
+                end
+              end
+              if dropped > 0 then
+                all_lazy = #kept == 0
+                ev_pattern = #kept == 1 and kept[1] or kept
+              end
+            end
+            -- The same check `nvim_create_autocmd` applies (`exists("##")`
+            -- reads only the first word, so it passes "BufRead,BufNewFile").
+            local known = pcall(vim.api.nvim_get_autocmds, { event = ev_name })
+            local bad_pattern = false
+            for _, pattern in ipairs(spec_mod.as_list(ev_pattern)) do
+              bad_pattern = bad_pattern or type(pattern) ~= "string"
+            end
+            local problem = foreign and ("event " .. foreign)
+              or (not known and ("unknown event " .. ev_name))
+              or (bad_pattern and ("event " .. ev_name .. " pattern must be a string or list of strings"))
+            if all_lazy then
+              ev_name = nil
+            elseif problem then
+              notify_err(entry.name .. ": " .. problem .. " (skipped; the plugin loads as if it were not set)")
+              ev_name = nil
+            end
+          end
+          if type(ev_name) == "string" and ev_name ~= "" then
+            local key = ev_name .. "\0" .. table.concat(vim.tbl_map(tostring, spec_mod.as_list(ev_pattern)), ",")
             if not seen_event[key] then
               seen_event[key] = true
               meta.events[#meta.events + 1] = { event = ev_name, pattern = ev_pattern }
@@ -492,7 +602,7 @@ function M.setup(config, dashboard)
           end
         end
 
-        local key_specs = spec_mod.normalize_key_specs(spec.keys, spec, notify_err)
+        local key_specs = spec_mod.normalize_key_specs(spec.keys, plugin_view(entry.name, spec), notify_err)
         if #key_specs > 0 then
           meta.has_keys = true
           vim.list_extend(meta.keys, key_specs)
@@ -529,11 +639,11 @@ function M.setup(config, dashboard)
     local i = 0
     local function step()
       i = i + 1
-      local build = builds[i]
-      if build == nil then
+      local hook = builds[i]
+      if hook == nil then
         return
       end
-      run_build(build, path, step)
+      run_build(name, hook.build, path, step, hook.spec)
     end
     step()
   end
@@ -574,6 +684,9 @@ function M.setup(config, dashboard)
   })
 
   local policy_was_empty = type(version_policy.plugins) ~= "table" or next(version_policy.plugins) == nil
+  -- Pins from another schema (an upgrade from an older release) are ignored
+  -- like a missing policy, so this session also runs without them.
+  local policy_outdated = not policy_was_empty and version_policy.schema ~= policy.SCHEMA
 
   if #pack_specs > 0 then
     install_specs(pack_specs)
@@ -589,6 +702,11 @@ function M.setup(config, dashboard)
           policy.refresh_version_policy_async(function(ok, reason)
             if ok and policy_was_empty then
               vim.notify("Generated initial version policy — restart to apply tag pins", vim.log.levels.INFO)
+            elseif ok and policy_outdated then
+              vim.notify(
+                "Rebuilt the version policy from an older release — restart to apply tag pins",
+                vim.log.levels.INFO
+              )
             elseif ok and reason == "full" then
               vim.notify("Refreshed version policy", vim.log.levels.INFO)
             end
@@ -700,9 +818,9 @@ function M.setup(config, dashboard)
     local has_config_true = false
     for _, spec in ipairs(entry.specs) do
       if type(spec.config) == "function" then
-        local ok, err = pcall(spec.config, spec, opts)
+        local ok, err = pcall(spec.config, plugin_view(entry.name, spec, triggers_mod.resolve_root(entry)), opts)
         if not ok then
-          notify_err("config() failed for " .. entry.name .. ": " .. tostring(err))
+          notify_err(entry.name .. ": config() failed: " .. tostring(err))
         end
         ran_config = true
       elseif spec.config == true then
@@ -803,19 +921,28 @@ function M.setup(config, dashboard)
       local meta = entry_meta[entry.name]
       entry_state[entry.name].status = "registered"
 
+      -- One invalid trigger (an unknown event, a bad key mode) is reported
+      -- against its entry and must not stop later entries from registering.
+      local function register(what, fn, ...)
+        local ok, err = pcall(fn, ...)
+        if not ok then
+          notify_err(entry.name .. ": " .. what .. " failed: " .. tostring(err))
+        end
+      end
+
       for _, key in ipairs(meta.keys) do
-        triggers.map_key_trigger(entry.name, key, load_entry)
+        register("key " .. tostring(key.lhs), triggers.map_key_trigger, entry.name, key, load_entry)
       end
 
       if meta.defer then
         for _, cmd_name in ipairs(meta.cmds) do
-          triggers.register_cmd_trigger(entry.name, cmd_name, load_entry)
+          register("cmd " .. cmd_name, triggers.register_cmd_trigger, entry.name, cmd_name, load_entry)
         end
         for _, event_item in ipairs(meta.events) do
-          triggers.register_event_trigger(entry.name, event_item, load_entry)
+          register("event " .. event_item.event, triggers.register_event_trigger, entry.name, event_item, load_entry)
         end
         if #meta.fts > 0 then
-          triggers.register_ft_trigger(entry, meta.fts, load_entry)
+          register("ft trigger", triggers.register_ft_trigger, entry, meta.fts, load_entry)
         end
       end
     end

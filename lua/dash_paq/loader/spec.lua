@@ -66,13 +66,51 @@ function M.normalize_spec(spec)
   return spec
 end
 
-function M.eval_gate(value, default)
+-- What a callback receives, as in lazy.nvim: one object per plugin with
+-- `name` and `dir` filled in, reading through every spec merged into it (the
+-- latest first) without changing them. A field `init` sets is there for
+-- `opts`/`config`/`build`, whichever spec defines them.
+local views = {}
+function M.plugin_view(name, spec, dir)
+  local record = views[name]
+  if not record then
+    local specs = {}
+    record = {
+      specs = specs,
+      view = setmetatable({ name = name }, {
+        __index = function(_, key)
+          for i = #specs, 1, -1 do
+            local value = specs[i][key]
+            if value ~= nil then
+              return value
+            end
+          end
+        end,
+      }),
+    }
+    views[name] = record
+  end
+  if not vim.tbl_contains(record.specs, spec) then
+    record.specs[#record.specs + 1] = spec
+  end
+  if dir ~= nil then
+    rawset(record.view, "dir", dir)
+  end
+  return record.view
+end
+
+-- `arg` is passed to a function gate (lazy.nvim passes the plugin);
+-- `on_error(err)` hears about a gate that throws, which then counts as false.
+function M.eval_gate(value, default, arg, on_error)
   if value == nil then
     return default
   end
   if type(value) == "function" then
-    local ok, result = pcall(value)
+    local ok, result = pcall(value, arg)
     if not ok then
+      if on_error then
+        on_error(result)
+      end
       return false
     end
     return result and true or false
@@ -109,7 +147,9 @@ function M.normalize_key_specs(specs, plugin_spec, notify_err)
   if type(specs) == "function" then
     local ok, resolved = pcall(specs, plugin_spec, {})
     if not ok then
-      notify_err("Failed to resolve key specs for " .. (plugin_spec.name or plugin_spec[1] or "<unknown>"))
+      notify_err(
+        tostring(plugin_spec.name or plugin_spec[1] or "<unknown>") .. ": keys() failed: " .. tostring(resolved)
+      )
       return {}
     end
     specs = resolved
@@ -117,6 +157,10 @@ function M.normalize_key_specs(specs, plugin_spec, notify_err)
 
   local normalized = {}
   for _, spec in ipairs(M.as_list(specs)) do
+    -- lazy.nvim's string form: an lhs with no rhs.
+    if type(spec) == "string" then
+      spec = { spec }
+    end
     if type(spec) == "table" then
       local lhs = spec.lhs or spec[1]
       local rhs = spec.rhs or spec[2]
@@ -156,6 +200,7 @@ function M.derive_module_candidates(entry)
     add(base:gsub("%.vim$", ""))
     add(base:gsub("^nvim%-", ""))
     add(base:gsub("^vim%-", ""))
+    add(base:gsub("[%.%-]lua$", ""))
     add(base:gsub("%-", "_"))
   end
 
@@ -227,7 +272,16 @@ function M.flatten_specs(module_names, direct_specs, opts)
 
   local function add_spec(spec, is_dependency)
     spec = M.normalize_spec(spec)
-    if not spec then
+    -- `{}` is the usual "nothing here" from `cond and { ... } or {}`.
+    if not spec or next(spec) == nil then
+      return nil
+    end
+
+    -- A nested list of specs, as lazy.nvim allows.
+    if type(spec[1]) == "table" then
+      for _, item in ipairs(spec) do
+        add_spec(item, is_dependency)
+      end
       return nil
     end
 
@@ -236,7 +290,21 @@ function M.flatten_specs(module_names, direct_specs, opts)
     if not name and type(spec.dir) == "string" then
       name = vim.fs.basename(spec.dir)
     end
+    if spec.import ~= nil then
+      local where = type(spec.import) == "string"
+          and (" under " .. spec.import .. " (e.g. " .. spec.import .. ".editor)")
+        or ""
+      notify_err(
+        (name and (name .. ": ") or "")
+          .. "`import` is not supported; list each module"
+          .. where
+          .. " in opts.modules instead"
+      )
+    end
     if not name then
+      if spec.import == nil then
+        notify_err("Skipped a spec with no source, dir, or name: " .. vim.inspect(spec, { newline = " ", indent = "" }))
+      end
       return nil
     end
 
@@ -265,11 +333,28 @@ function M.flatten_specs(module_names, direct_specs, opts)
       entry.is_dev = M.is_dev_entry(name, nil, dev_cfg)
     end
 
-    if not M.eval_gate(spec.enabled, true) or not M.eval_gate(spec.cond, true) then
-      entry.enabled = false
+    local gate_spec = M.plugin_view(name, spec)
+    for _, field in ipairs({ "enabled", "cond" }) do
+      local open = M.eval_gate(spec[field], true, gate_spec, function(err)
+        notify_err(name .. ": " .. field .. "() failed: " .. tostring(err))
+      end)
+      if not open then
+        entry.enabled = false
+      end
     end
 
-    local deps = M.as_list(spec.dependencies)
+    -- Nested lists flattened here, so every dependency keeps its edge.
+    local deps = {}
+    local function collect(list)
+      for _, dep in ipairs(M.as_list(list)) do
+        if type(dep) == "table" and type(dep[1]) == "table" then
+          collect(dep)
+        else
+          deps[#deps + 1] = dep
+        end
+      end
+    end
+    collect(spec.dependencies)
     for _, dep in ipairs(deps) do
       if type(dep) == "string" then
         local dep_name = M.repo_to_name(dep)
@@ -298,7 +383,7 @@ function M.flatten_specs(module_names, direct_specs, opts)
   for _, module_name in ipairs(module_names or {}) do
     local ok, mod = pcall(require, module_name)
     if not ok then
-      notify_err("Failed loading plugin module: " .. module_name)
+      notify_err("Failed loading plugin module " .. module_name .. ": " .. tostring(mod))
     else
       for _, spec in ipairs(M.as_list(mod)) do
         add_spec(spec, false)
@@ -318,9 +403,9 @@ function M.resolve_opts(entry, notify_err)
     if type(spec_opts) == "function" then
       -- An opts function counts even if it returns nil (in-place edit).
       has_opts = true
-      local ok, result = pcall(spec_opts, spec, opts)
+      local ok, result = pcall(spec_opts, M.plugin_view(entry.name, spec), opts)
       if not ok then
-        notify_err("opts() failed for " .. entry.name)
+        notify_err(entry.name .. ": opts() failed: " .. tostring(result))
       elseif result ~= nil then
         opts = result
       end
