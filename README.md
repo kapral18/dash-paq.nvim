@@ -67,8 +67,8 @@ require("dash_paq").setup({
 })
 ```
 
-`hosts` is merged over the two built-in entries (`github.com`, `codeberg.org`); add a host to get diff/commit
-links for it in the dashboard. Every field and its default: `:h dash-paq-config`.
+`hosts` is merged over the two built-in entries (`github.com`, `codeberg.org`); add a host to get compare and
+commit pages for it in the dashboard. Every field and its default: `:h dash-paq-config`.
 
 ## Commands
 
@@ -122,6 +122,9 @@ before restarting changes the saved choice. Resolution rules: `:h dash-paq-dev`.
   `import`/`specs`/`pin`/`submodules`/`url` fields, no `VeryLazy`/`User` synthetic startup events.
 
 ## Development
+
+Tests need Make, Neovim, Git, Bash, and Perl. Linting needs StyLua.
+`DASH_PAQ_NVIM` selects the test executable; it defaults to `nvim`.
 
 ```sh
 make test

@@ -96,7 +96,6 @@ local function breaking_commit_hashes(path, rev_before, rev_after)
   return set
 end
 
-M.is_commit_string = version.is_commit_string
 M.compute_version_drift = version.compute_version_drift
 M.detect_risky_star_pin = version.detect_risky_star_pin
 M.refresh_version_flags_async = version.refresh_version_flags_async

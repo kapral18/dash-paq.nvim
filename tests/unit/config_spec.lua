@@ -44,8 +44,8 @@ t.describe("dashboard/version_policy/dev are omitted", function()
   local resolved = config.setup({ spec = { "owner/repo" } })
 
   t.it("fills in the documented dashboard defaults", function()
-    t.assert.equals(0.68, resolved.dashboard.width_ratio)
-    t.assert.equals(84, resolved.dashboard.min_width)
+    t.assert.equals(0.68, resolved.dashboard.height_ratio)
+    t.assert.equals(18, resolved.dashboard.min_height)
     t.assert.equals(8, resolved.dashboard.fetch_concurrency)
     t.assert.equals(4, resolved.dashboard.apply_batch_size)
   end)
@@ -95,14 +95,14 @@ end)
 t.describe("a partial dashboard/version_policy/hosts table is supplied", function()
   local resolved = config.setup({
     spec = { "owner/repo" },
-    dashboard = { min_width = 100 },
+    dashboard = { min_height = 30 },
     version_policy = { min_tags = 5 },
     hosts = { ["gitlab.com"] = { compare = "-/compare/%s...%s", commit = "-/commit/%s" } },
   })
 
   t.it("deep-merges overrides onto the dashboard defaults", function()
-    t.assert.equals(100, resolved.dashboard.min_width)
-    t.assert.equals(0.68, resolved.dashboard.width_ratio) -- untouched default
+    t.assert.equals(30, resolved.dashboard.min_height)
+    t.assert.equals(0.68, resolved.dashboard.height_ratio) -- untouched default
   end)
 
   t.it("deep-merges overrides onto the version_policy defaults", function()

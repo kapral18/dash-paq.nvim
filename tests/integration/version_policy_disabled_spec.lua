@@ -14,10 +14,10 @@ local policy_path = vim.fs.joinpath(policy_dir, "version_policy.json")
 vim.fn.mkdir(policy_dir, "p")
 vim.fn.writefile({
   vim.json.encode({
-    schema = 3,
+    schema = 4,
     generated_at = os.time(),
     plugins = {
-      pinnedplug = { strategy = "tags", latest_tag = "v9.9.9", semver_tags = true, tag_count = 1 },
+      pinnedplug = { src = remote.src, strategy = "tags", latest_tag = "v9.9.9", semver_tags = true, tag_count = 1 },
     },
   }),
 }, policy_path)

@@ -84,7 +84,13 @@ triggered: `plugin/**`, `config`/`opts`, `after/plugin/**`.
     |vim.pack.add()|: startup plugins still land on 'runtimepath', run
     `config`/`opts`.
   - When a declared plugin's `src` changes between Neovim sessions,
-    `setup()` deletes the old clone and re-clones it from the new `src`.
+    `setup()` preserves the old checkout beside `opt` as
+    `<name>.backup-<id>` and installs the new `src`. It reports the backup
+    path. If installation fails, it restores the previous checkout when
+    the target path is free; otherwise it reports the backup for recovery.
+    Restart to register a restored clone with `vim.pack`.
+    Source strings must match exactly, as in `vim.pack`; use the same
+    spelling in bootstrap calls and specs, including the `.git` suffix.
 
 ==============================================================================
 4. Setup                                                      *dash-paq-setup*
@@ -159,18 +165,13 @@ Supported fields:
                    load, any route. `lhs`-only: loads the plugin,
                    replays `lhs` into its own mapping.
   `cmd`            String/list of command names, deferring load until
-                   first use; forwards `<bang>`/range/`<mods>`/args.
-                   The lazy stub treats numeric prefixes as line ranges,
-                   so count-taking commands may fail with E16. Use
-                   |:DashPaq-load| before invoking one with a count.
+                   first use; forwards `<bang>`/range/count/`<mods>`/args.
+                   The loaded command validates the numeric prefix.
   `event`          String, `{ event = "User", pattern = "Ready" }`, or a
                    list; defers load until fired. After loading, the
                    event replays only in augroups that had no handler
-                   for it before loading. Replay uses the buffer for
-                   filename-shaped events, `pattern` for
-                   `User`/`CmdlineEnter`/`ColorScheme`/`OptionSet`/
-                   `ModeChanged` (others by buffer, may not match); no
-                   augroup, no replay.
+                   for it before loading. Replay preserves the match
+                   and buffer context; no augroup, no replay.
   `ft`             String or list of filetypes, deferring load.
   `lazy`           `false` loads at startup even when triggers are set;
                    `true` keeps it deferred with no trigger (loadable via
@@ -186,6 +187,11 @@ provides (`lua/<name>.lua` or `lua/<name>/`) -- e.g.
 before its own `event` trigger has fired. This is automatic, not an
 opt-in spec field; a disabled entry is never loaded this way, and
 |:DashPaq-trace| shows the reason as `require:<modname>`.
+Shared namespaces select the first entry in dependency order that provides
+the requested module. Linked Lua files and directories are supported.
+A missing plugin or required dependency directory leaves its load triggers
+available for retry. `require()` retries discovery when a missing Lua directory
+becomes available.
 
 Unsupported fields                                 *dash-paq-spec-unsupported*
 
@@ -203,9 +209,7 @@ to disable, or a table deep-merged over the defaults below.
 dashboard                                          *dash-paq-config-dashboard*
 >lua
     dashboard = {
-      width_ratio = 0.68,       -- window width fraction
       height_ratio = 0.68,      -- window height fraction
-      min_width = 84,
       min_height = 18,
       margin = 6,               -- gap kept to editor edge
       refresh_on_open = true,   -- refresh online on open
@@ -244,7 +248,7 @@ default_host / hosts                                   *dash-paq-config-hosts*
 <
 `hosts` is merged over built-in `github.com`/`codeberg.org` entries
 (both `{ compare = "compare/%s...%s", commit = "commit/%s" }`). Add a
-host (both `compare` and `commit`) for its dashboard diff/commit links;
+host (both `compare` and `commit`) for its dashboard compare and commit pages;
 an entry missing either field is dropped.
 
 dev                                                      *dash-paq-config-dev*
@@ -290,8 +294,9 @@ Show the lockfile path, plugin count, mtime.
 Copy the live lockfile to `{path}`. `{path}` may contain spaces.
 
 :DashPaq lock import {path}
-Overwrite the live lockfile from `{path}` after validating its JSON
-shape. Restart afterwards: `vim.pack` keeps the lockfile it read at
+Overwrite the live lockfile from `{path}` after validating plugin names,
+sources, revisions, and serialized versions. Restart afterwards:
+`vim.pack` keeps the lockfile it read at
 startup in memory, so any update or delete applied before the restart
 (for example a confirmed |:DashPaq-sync| or |:DashPaq-status|, or the
 dashboard's `u`/`U`/`<CR>`/`V`/`C`) writes that copy back over the
@@ -334,11 +339,12 @@ Buffer-local to the dashboard window:
   `u`              update pending plugins among visible selections;
                    with no visible selection, use the cursor row
   `U`              update all visible pending
-  `C`              clean selected orphans, else all orphans; confirm
+  `C`              delete selected plugins not in spec, else all of them;
+                   confirm
   `V`              heal selected drifted plugins, else all drifted plugins;
                    re-checkout to declared version offline
-  `o`              open diff URL, fallback repo URL
-  `O`              open repo URL
+  `o`              open the compare page of a pending update, else the repo
+  `O`              open the repository
   `K`              open the details popup
   `L`              toggle a dev-capable plugin between upstream and a local
                    checkout (|dash-paq-dev|); saves the choice and
@@ -352,11 +358,14 @@ Buffer-local to the dashboard window:
 
 `C` and `V` include rows hidden by search or filters.
 
-`<CR>`/`u`/`U` fetch in the background, then check out each fetched
+`<CR>`/`u`/`U` fetch in the background, confirm breaking changes against
+the fetched targets, then check out each fetched
 plugin with `vim.pack.update`, which blocks input while it runs. While
 the cursor keeps changing lines, queued checkouts wait until it has
 stayed on one line for 300 ms. The progress counter counts completed rows,
-including checkouts.
+including checkouts. Applied counts include only confirmed successful
+checkouts. Operations continue after closing the window; a new operation
+waits for the previous one to finish.
 
 Filter/search/sort state persists across sessions (see
 |dash-paq-state|); a saved `selected` filter reopens as `all`.
@@ -364,30 +373,48 @@ Selection is not persisted: it starts empty each time the dashboard opens.
 
 Details popup keys                                     *dash-paq-details-keys*
 `K` opens: one line per pending commit (breaking-change markers), plus
-status/risk/source/repo/diff/revision metadata.
+the status in the title and its risk, reason, semver, signals, version,
+source, repo, and compare page.
 
   `q`/`<Esc>`   close the popup
   `o`           open the commit under the cursor
-  `O`           open the compare URL for every pending commit
+  `O`           open the compare page for every pending commit
   `r`           open the plugin repository
 
-Row status values: `update`/`same`/`error`/`unknown`, `orphan`
-(installed, no longer declared), `drift` (checkout no longer matches
-declared version), `risky` (`version = "*"` would pick a non-release
-tag over the latest real release), and `local` (a |dash-paq-dev|
-override, never touched by `vim.pack`).
+Row statuses, by the words the dashboard shows: `update`, `up to date`,
+`failed` (the check or update failed), `not checked`, `not in spec`
+(installed, no longer declared), `drifted` (checkout no longer matches
+the declared version), `non-release tag` (`version = "*"` would pick a
+non-release tag over the latest real release), and `local` (a
+|dash-paq-dev| override, never touched by `vim.pack`).
 
-Status counts cover all plugins; the header shows how many are visible.
-The `RK` column shows `!` for a possible breaking change, `+` when no
-breaking signal was detected, and `-` when unknown or not assessed.
-Signals come from versions and commit messages, not compatibility tests.
+The window is as wide as the table plus a two-cell margin on each side
+(narrower editors scroll it horizontally). The header keeps a fixed
+height. Below a blank line it shows the title and the filters as pills,
+the active one highlighted (`f` cycles them), and `press ? for help` on
+the right. While an operation runs, a progress bar fills the next line.
+Then a summary: `Total: N plugins` (`Showing: N of M plugins` while a
+filter or search is active, the task progress while an operation runs)
+and each non-zero status count with its icon; when the line is too wide,
+counts drop their words from the right. Counts cover all
+plugins. A dimmed line shows the last check time, sort, search, and
+selection.
+
+Below the header, the table titles its columns `Plugin`, `Version`, and
+`Note`. Each row shows a selection box, the status icon, the plugin, its
+version (`current -> target` for an update), and a note in words for
+rows that need attention: `possibly breaking`, `drifted from spec`,
+`non-release tag`, `not in spec`, `failed`, `not checked`. `?`
+lists what each icon means. Breaking signals come from versions and
+commit messages, not compatibility tests.
 Use |:DashPaq-stats| for the last check counts and check/apply times.
 
 ==============================================================================
 9. Version policy                                    *dash-paq-version-policy*
 
 With no `version`/`commit`/`tag`/`branch`, the version policy decides
-release tags or default branch tip. It caches the decision per plugin
+release tags or default branch tip. It caches the decision per plugin name
+and source; a changed source invalidates the old decision. It stores these
 under |dash-paq-state|, re-evaluating once per `ttl_days` (default
 3), async after startup (`startup_delay_ms` after `VimEnter`, one plugin
 per tick) or sync on |:DashPaq-sync|/|:DashPaq-status|/
@@ -505,8 +532,8 @@ is not installed yet is not checked; the restart installs it.
 
 Under `stdpath("state") .. "/dash-paq/"`:
 
-  `version_policy.json`   per-plugin strategy, latest tag, reasoning
-                          (schema 3; see |dash-paq-version-policy|).
+  `version_policy.json`   per-plugin source, strategy, latest tag, reasoning
+                          (schema 4; see |dash-paq-version-policy|).
   `dashboard_state.json`  last update report (per-plugin status, pending
                           commits, diff URLs), timestamps/counters,
                           filter/sort/search state.
@@ -521,21 +548,20 @@ through `vim.pack`. It lives at
 ==============================================================================
 13. Highlight groups                                     *dash-paq-highlights*
 
-All groups are `default = true` links; any colorscheme can override
+All groups are set with `default = true`; any colorscheme can override
 them without `:highlight!`.
 
-  DashPaqTitle            DashPaqStatusOrphan
-  DashPaqFiltered         DashPaqStatusDrift
-  DashPaqProgress         DashPaqStatusRisky
-  DashPaqKey              DashPaqStatusLocal
-  DashPaqMeta             DashPaqRiskBreak
-  DashPaqLabel            DashPaqRiskSafe
-  DashPaqValue            DashPaqRiskUnknown
-  DashPaqBar              DashPaqLink
-  DashPaqRule             DashPaqSelected
-  DashPaqHeader           DashPaqStatusUpdate
-  DashPaqStatusSame       DashPaqStatusError
-  DashPaqStatusUnknown
+  DashPaqH1               DashPaqStatusUpdate
+  DashPaqH2               DashPaqStatusSame
+  DashPaqButton           DashPaqStatusError
+  DashPaqButtonActive     DashPaqStatusUnknown
+  DashPaqFiltered         DashPaqStatusOrphan
+  DashPaqProgress         DashPaqStatusDrift
+  DashPaqKey              DashPaqStatusRisky
+  DashPaqMeta             DashPaqStatusLocal
+  DashPaqRule             DashPaqRiskBreak
+  DashPaqHeader           DashPaqRiskSafe
+  DashPaqSelected         DashPaqLink
 
 ==============================================================================
 14. Limitations                                         *dash-paq-limitations*

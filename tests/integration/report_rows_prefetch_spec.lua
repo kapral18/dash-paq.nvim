@@ -28,15 +28,8 @@ gitfixture.push(tagged)
 local pipeline = require("dash_paq.dashboard.report.pipeline")
 local report = require("dash_paq.dashboard.report")
 local state = require("dash_paq.dashboard.state")
-local gitcmd = require("dash_paq.dashboard.analysis.gitcmd")
-local signals = require("dash_paq.dashboard.analysis.signals")
-
--- Independent reference values from a fresh clone of the bare remote: its
--- cache keys (keyed by path) are guaranteed cold, so these prove what the
--- sync-only inference would have produced on its own, for parity comparison.
-local mirror = gitfixture.tmp_dir("tagged-mirror")
-vim.fn.delete(mirror, "rf")
-gitfixture.run({ "git", "clone", "--quiet", tagged.bare, mirror })
+local git = require("dash_paq.git")
+local popups = require("dash_paq.dashboard.ui.popups")
 
 local pipeline_results = {}
 local pipeline_done = false
@@ -55,16 +48,6 @@ t.describe("the refresh pipeline prefetches breaking-change inputs for an 'updat
     t.assert.equals("update", pipeline_results.tagged.status)
   end)
 
-  local expected_current = gitcmd.tag_on_revision(mirror, pipeline_results.tagged.rev_before)
-  local expected_target = gitcmd.tag_on_revision(mirror, pipeline_results.tagged.rev_after)
-  local expected_messages =
-    gitcmd.commit_messages_between(mirror, pipeline_results.tagged.rev_before, pipeline_results.tagged.rev_after)
-  local expected_pending =
-    gitcmd.pending_updates_between(mirror, pipeline_results.tagged.rev_before, pipeline_results.tagged.rev_after)
-  local expected_message_text = (type(expected_messages) == "string" and expected_messages ~= "") and expected_messages
-    or (expected_pending or "")
-  local expected_commit_signal = signals.format_commit_signals(signals.classify_commit_signals(expected_message_text))
-
   -- Seed the cache the way ui/refresh.lua's apply_pipeline_result does for a
   -- non-error result: status/source/path/rev_before/rev_after set, every
   -- breaking-status-derived field cleared.
@@ -76,36 +59,31 @@ t.describe("the refresh pipeline prefetches breaking-change inputs for an 'updat
     rev_after = pipeline_results.tagged.rev_after,
   }
 
-  local wait_calls = 0
-  local orig_system = vim.system
-  vim.system = function(cmd, opts, on_exit)
-    local handle = orig_system(cmd, opts, on_exit)
-    local orig_wait = handle.wait
-    handle.wait = function(...)
-      wait_calls = wait_calls + 1
-      return orig_wait(...)
-    end
-    return handle
+  local calls = 0
+  local original_run = git.run
+  git.run = function(...)
+    calls = calls + 1
+    return original_run(...)
   end
+  local ok, row = pcall(function()
+    local collected = report.collect_dashboard_row("tagged")
+    local ctx = require("dash_paq.dashboard.ui.view").new_context({ rows = {}, selected = {} })
+    popups.open_details(ctx, collected)
+    popups.close_details(ctx)
+    return collected
+  end)
+  git.run = original_run
+  assert(ok, row)
 
-  local row = report.collect_dashboard_row("tagged")
-
-  vim.system = orig_system
-
-  t.it("collects the row with zero `:wait()` git calls (prefetch already filled the caches)", function()
-    t.assert.equals(0, wait_calls)
+  t.it("SHOULD collect the row and open its details without more Git queries", function()
+    t.assert.equals(0, calls)
   end)
 
-  t.it("the collected row's breaking-status fields equal the cold sync-inference values", function()
-    t.assert.equals(expected_current, row.current_version)
-    t.assert.equals(expected_target, row.target_version)
-    -- Not a strict string equality against `expected_pending`: git's `%h`
-    -- abbreviation length depends on the repo's object count, which can
-    -- differ slightly between the mirror clone and vim.pack's own installed
-    -- checkout even for the identical commit. The shape and subject text are
-    -- what matters here.
+  t.it("SHOULD describe the fixture's minor release without a breaking signal", function()
+    t.assert.equals("v1.0.0", row.current_version)
+    t.assert.equals("v1.1.0", row.target_version)
     t.assert.match("^%x%x%x%x%x%x%x+ │ feat: add feature$", row.pending_updates or "")
-    t.assert.equals(expected_commit_signal, row.commit_signal)
+    t.assert.equals("feat:1", row.commit_signal)
     t.assert.equals("minor", row.semver_delta)
     t.assert.equals(false, row.breaking)
     t.assert.equals("semver minor bump", row.risk_reason)

@@ -88,7 +88,17 @@ local function parse_pack_report_buffer(bufnr)
     end
   end
 
-  for _, p_data in pairs(plugins) do
+  -- Native error sections omit Source. Bind them now so a later source change
+  -- cannot reuse an error belonging to the previous repository.
+  local sources = {}
+  local ok, installed = pcall(vim.pack.get, nil, { info = false })
+  if ok and type(installed) == "table" then
+    for _, plugin in ipairs(installed) do
+      sources[plugin.spec.name] = plugin.spec.src
+    end
+  end
+  for name, p_data in pairs(plugins) do
+    p_data.source = p_data.source or sources[name]
     p_data.pending_updates = table.concat(p_data.pending_lines or {}, "\n")
     p_data.breaking = analysis.infer_breaking_status(p_data)
     p_data.diff_url = analysis.source_to_compare_url(p_data.source, p_data.rev_before, p_data.rev_after)

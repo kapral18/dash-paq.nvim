@@ -1,6 +1,7 @@
 local state = require("dash_paq.dashboard.state")
 local analysis = require("dash_paq.dashboard.analysis")
 local notify = require("dash_paq.notify")
+local git = require("dash_paq.git")
 
 local M = {}
 
@@ -48,10 +49,23 @@ end
 -- single-row builders so per-row refresh produces identical rows.
 local function build_dashboard_row(plugin, orphan_flagging, version_flagging)
   local name = plugin.spec.name
-  local p_data = state.pack_report_cache.plugins[name] or {}
+  local p_data = state.pack_report_cache.plugins[name]
+  if p_data and not git.same_remote(p_data.source, plugin.spec.src) then
+    state.pack_report_cache.plugins[name] = nil
+    state.write_persisted_state()
+    p_data = nil
+  end
+  p_data = p_data or {}
   local status = p_data.status or "unknown"
-  local source = p_data.source or plugin.spec.src
-  local diff_url = p_data.diff_url or analysis.source_to_compare_url(source, p_data.rev_before, p_data.rev_after)
+  local source = plugin.spec.src
+  -- Equal revisions would link an empty compare page; `o` falls back to the repo.
+  local diff_url = p_data.diff_url
+    or (p_data.rev_before ~= p_data.rev_after and analysis.source_to_compare_url(
+      source,
+      p_data.rev_before,
+      p_data.rev_after
+    ))
+    or nil
   local breaking = p_data.breaking
   -- An `active = true` plugin is declared by definition even without a
   -- matching spec; treating it as an orphan would let `C` (clean) delete it.
@@ -159,9 +173,9 @@ local function collect_dashboard_rows()
   end
 
   -- Only flag orphans once the loader has advertised its declared set.
-  -- Before that the cache is empty and we must not mark everything as
+  -- Before publication we must not mark everything as
   -- orphaned (e.g. when a user runs `:DashPaq` from a minimal config).
-  local orphan_flagging = next(state.declared_names_cache) ~= nil
+  local orphan_flagging = state.declared_names_published
   local version_flagging = next(state.declared_versions_cache) ~= nil
 
   local rows = {}
@@ -188,7 +202,7 @@ local function collect_dashboard_row(name)
   if not ok or type(plugins) ~= "table" or not plugins[1] then
     return nil
   end
-  local orphan_flagging = next(state.declared_names_cache) ~= nil
+  local orphan_flagging = state.declared_names_published
   local version_flagging = next(state.declared_versions_cache) ~= nil
   return build_dashboard_row(plugins[1], orphan_flagging, version_flagging)
 end

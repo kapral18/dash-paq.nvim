@@ -139,4 +139,16 @@ t.describe("completing :DashPaq", function()
   end)
 end)
 
+t.describe("WHEN completion runs before existing arguments", function()
+  t.it("SHOULD complete the subcommand at the cursor", function()
+    t.assert.same({ "trace" }, commands.complete("tr", "DashPaq tr alpha", 10))
+  end)
+
+  t.it("SHOULD pass only arguments before the cursor", function()
+    reset()
+    commands.complete("/tm", "DashPaq lock export /tm ignored", 23)
+    t.assert.same({ "export" }, calls[1].done)
+  end)
+end)
+
 t.finish()

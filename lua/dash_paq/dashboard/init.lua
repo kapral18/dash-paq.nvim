@@ -6,6 +6,7 @@ local analysis = require("dash_paq.dashboard.analysis")
 local policy = require("dash_paq.policy")
 local commands = require("dash_paq.commands")
 local fs = require("dash_paq.fs")
+local gitcmd = require("dash_paq.dashboard.analysis.gitcmd")
 
 local M = {}
 
@@ -15,6 +16,11 @@ local rebuild_version_policy = policy.rebuild_version_policy
 local refresh_version_policy_if_needed = policy.refresh_version_policy_if_needed
 -- opts.version_policy ~= false
 local version_policy_enabled = false
+
+local function invalidate_version_evidence()
+  gitcmd.invalidate_tags()
+  state.invalidate_version_flags()
+end
 
 function M.set_declared_plugin_names(names)
   state.set_declared_plugin_names(names)
@@ -52,6 +58,7 @@ end
 
 local function check_updates(offline)
   vim.pack.update(nil, { offline = offline })
+  invalidate_version_evidence()
   local counts = report.refresh_pack_report_cache_from_report_buffer()
   if counts then
     state.pack_report_cache.last_check_counts = counts
@@ -227,6 +234,10 @@ function M.setup(config)
   state.set_dashboard_config(config.dashboard)
   analysis.configure_hosts(config.hosts)
   state.load_persisted_state_once()
+  vim.api.nvim_create_autocmd("PackChanged", {
+    group = vim.api.nvim_create_augroup("dash_paq_version_evidence", { clear = true }),
+    callback = invalidate_version_evidence,
+  })
 
   commands.register_default({
     usage = "[!]",

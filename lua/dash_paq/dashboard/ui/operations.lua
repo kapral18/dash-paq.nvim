@@ -1,13 +1,51 @@
 local analysis = require("dash_paq.dashboard.analysis")
-local report = require("dash_paq.dashboard.report")
 local state = require("dash_paq.dashboard.state")
 local policy = require("dash_paq.policy")
-local view = require("dash_paq.dashboard.ui.view")
 local refresh = require("dash_paq.dashboard.ui.refresh")
 local dev = require("dash_paq.loader.dev")
 local fs = require("dash_paq.fs")
+local git = require("dash_paq.git")
 
 local M = {}
+
+local function checkout_rows(_, results)
+  local changed, outcomes = {}, {}
+  local names = {}
+  for _, result in ipairs(results) do
+    local head = git.run({ "-C", result.path, "rev-parse", "HEAD" }, { text = true }):wait()
+    if head.code == 0 and vim.trim(head.stdout) == result.rev_after then
+      outcomes[result.name] = { status = "same" }
+    else
+      names[#names + 1] = result.name
+    end
+  end
+  if #names == 0 then
+    return outcomes, 0
+  end
+  local event = vim.api.nvim_create_autocmd("PackChanged", {
+    callback = function(ev)
+      if ev.data and ev.data.kind == "update" then
+        changed[ev.data.spec.name] = true
+      end
+    end,
+  })
+  local ok, err = pcall(vim.pack.update, names, { offline = true, force = true })
+  vim.api.nvim_del_autocmd(event)
+  local applied = 0
+  for _, result in ipairs(results) do
+    if not outcomes[result.name] then
+      local head = git.run({ "-C", result.path, "rev-parse", "HEAD" }, { text = true }):wait()
+      if changed[result.name] and head.code == 0 and vim.trim(head.stdout) == result.rev_after then
+        outcomes[result.name] = { status = "same" }
+        applied = applied + 1
+      else
+        outcomes[result.name] =
+          { status = "error", error = not ok and tostring(err) or "Checkout failed; target revision was not applied" }
+      end
+    end
+  end
+  return outcomes, applied
+end
 
 function M.update_by_names(ctx, names, empty_msg, noop_msg)
   if #names == 0 then
@@ -33,29 +71,6 @@ function M.update_by_names(ctx, names, empty_msg, noop_msg)
     return
   end
 
-  if state.dashboard_config.skip_risk_confirm ~= true then
-    local risky, selected_set = {}, {}
-    for _, name in ipairs(filtered) do
-      selected_set[name] = true
-    end
-    for _, row in ipairs(ctx.rows) do
-      if selected_set[row.name] and row.breaking == true then
-        risky[#risky + 1] = row.name
-      end
-    end
-    if #risky > 0 then
-      local msg = string.format(
-        "%d plugin(s) flagged as breaking (%s).\nProceed with the update?",
-        #risky,
-        table.concat(risky, ", ")
-      )
-      if vim.fn.confirm(msg, "&Yes\n&No", 2) ~= 1 then
-        vim.notify("Update cancelled", vim.log.levels.INFO)
-        return
-      end
-    end
-  end
-
   -- Fetch asynchronously, then apply local checkouts in bounded batches.
   -- vim.pack.update still blocks input during each checkout.
   local applied = 0
@@ -64,12 +79,37 @@ function M.update_by_names(ctx, names, empty_msg, noop_msg)
     online = true,
     label = "Updating",
     apply_batch_size = state.dashboard_config.apply_batch_size,
-    apply_rows = function(batch)
-      local ok, err = pcall(vim.pack.update, batch, { offline = true, force = true })
-      if ok then
-        applied = applied + #batch
+    before_apply = function(results)
+      local risky = {}
+      if state.dashboard_config.skip_risk_confirm ~= true then
+        for _, result in ipairs(results) do
+          if analysis.infer_breaking_status(result) == true then
+            risky[#risky + 1] = result.name
+          end
+        end
       end
-      return ok, err
+      if
+        #risky > 0
+        and vim.fn.confirm(
+            string.format(
+              "%d plugin(s) flagged as breaking (%s).\nProceed with the update?",
+              #risky,
+              table.concat(risky, ", ")
+            ),
+            "&Yes\n&No",
+            2
+          )
+          ~= 1
+      then
+        vim.notify("Update cancelled", vim.log.levels.INFO)
+        return false
+      end
+      return true
+    end,
+    apply_rows = function(batch, results)
+      local outcomes, count = checkout_rows(batch, results)
+      applied = applied + count
+      return outcomes
     end,
     on_finalize = function()
       if applied > 0 then
@@ -86,7 +126,7 @@ end
 
 function M.clean_orphan_rows(ctx, targets, scope_label)
   if #targets == 0 then
-    vim.notify("No orphan plugins to clean", vim.log.levels.INFO)
+    vim.notify("No plugins outside the spec to delete", vim.log.levels.INFO)
     return
   end
 
@@ -95,8 +135,12 @@ function M.clean_orphan_rows(ctx, targets, scope_label)
     if #preview > 240 then
       preview = preview:sub(1, 237) .. "..."
     end
-    local msg =
-      string.format("Delete %d %s orphan plugin(s) from disk and the lockfile?\n  %s", #targets, scope_label, preview)
+    local msg = string.format(
+      "Delete %d plugin(s) not in spec (%s) from disk and the lockfile?\n  %s",
+      #targets,
+      scope_label,
+      preview
+    )
     if vim.fn.confirm(msg, "&Yes\n&No", 2) ~= 1 then
       vim.notify("Deletion cancelled", vim.log.levels.INFO)
       return
@@ -119,38 +163,11 @@ function M.heal_drift_rows(ctx, targets)
     return
   end
 
-  -- Recompute drift flags after checkout; they override the update/same status.
   refresh.run_row_op(ctx, {
     names = targets,
     online = false,
     label = "Restoring versions",
-    apply = function()
-      vim.pack.update(targets, { offline = true, force = true })
-      state.version_flags_cache = {}
-      state.version_flags_scanned = false
-    end,
-    -- No success toast (the rows flip in place); done_notify is kept only to
-    -- re-derive drift/risky flags and refresh the healed rows after the op.
-    done_notify = function()
-      analysis.refresh_version_flags_async(function()
-        for _, name in ipairs(targets) do
-          local line_no = ctx.line_by_name and ctx.line_by_name[name]
-          if line_no then
-            local row = report.collect_dashboard_row(name)
-            if row then
-              ctx.row_by_line[line_no] = row
-              for i, existing in ipairs(ctx.rows or {}) do
-                if existing.name == name then
-                  ctx.rows[i] = row
-                  break
-                end
-              end
-              view.render_row(ctx, name)
-            end
-          end
-        end
-      end)
-    end,
+    apply_rows = checkout_rows,
   })
 end
 
@@ -256,11 +273,13 @@ function M.open_diff_or_repo_for_row(row)
     return
   end
   if row.repo_url then
-    vim.notify("No direct compare URL; opening repository instead", vim.log.levels.INFO)
+    if row.status == "update" then
+      vim.notify("No compare page; opening the repository instead", vim.log.levels.INFO)
+    end
     vim.ui.open(row.repo_url)
     return
   end
-  vim.notify("No diff/repo URL for this plugin", vim.log.levels.WARN)
+  vim.notify("No compare page or repository for this plugin", vim.log.levels.WARN)
 end
 
 return M

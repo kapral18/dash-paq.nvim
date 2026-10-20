@@ -6,15 +6,17 @@ local M = {}
 local semver_major = semver.semver_major
 local parse_release_tag = semver.parse_release_tag
 
--- Per-process caches keyed by `path[@rev]`. Tags rarely change within a single
--- nvim session, and these queries shell out to git, so caching keeps the
--- dashboard render path cheap on repeated opens.
+-- Shared by synchronous reads and prefetch; tag caches are reset after fetch/update.
 local revision_tag_cache = {}
 local revision_tags_cache = {}
 local repo_tags_cache = {}
-local commit_messages_cache = {}
-local commit_records_cache = {}
-local pending_updates_cache = {}
+local commit_range_cache = {}
+
+function M.invalidate_tags()
+  revision_tag_cache = {}
+  revision_tags_cache = {}
+  repo_tags_cache = {}
+end
 
 local function git_tags(path, args, cache, key)
   if type(path) ~= "string" or path == "" then
@@ -85,19 +87,13 @@ local function parse_tag_on_revision(result)
     return false
   end
 
-  local tags = {}
-  for _, line in ipairs(vim.split(result.stdout, "\n", { trimempty = true })) do
-    if line ~= "" then
-      tags[#tags + 1] = line
-    end
-  end
+  local tags = vim.split(result.stdout, "\n", { trimempty = true })
 
   table.sort(tags, tag_gt)
   return tags[1] or false
 end
 
--- Both range queries below share the same arg contract: non-empty path and
--- both endpoints. Returns the cache key when valid, nil otherwise.
+-- Require a path and both endpoints before forming a Git range.
 local function range_key(path, rev_before, rev_after)
   if
     type(path) ~= "string"
@@ -112,25 +108,32 @@ local function range_key(path, rev_before, rev_after)
   return path .. "@" .. rev_before .. ".." .. rev_after
 end
 
-local function commit_messages_cmd(path, rev_before, rev_after)
-  return { "-C", path, "log", "--format=%s%n%b", rev_before .. ".." .. rev_after }
+local function commit_range_cmd(path, rev_before, rev_after)
+  return { "-C", path, "log", "--format=%h%x00%s%n%b%x00", rev_before .. ".." .. rev_after }
 end
 
--- Rebuilds the "Pending updates:" text for a row refreshed by the per-row
--- pipeline rather than the `:DashPaq sync`/`:DashPaq status` report parser, in the
--- same `hash │ subject`-per-line shape `popups.lua` parses.
-local function pending_updates_cmd(path, rev_before, rev_after)
-  return { "-C", path, "log", "--format=%h │ %s", rev_before .. ".." .. rev_after }
-end
-
--- Trims stdout to `false` (git failure / empty range), matching both the
--- commit-messages and pending-updates cache value shape.
-local function parse_trimmed_or_false(result)
+-- One log supplies risk inference, pending subjects, and per-commit breaking markers.
+-- NUL delimits fields without treating control characters in messages as records.
+local function parse_commit_range(result)
   if result.code ~= 0 or type(result.stdout) ~= "string" then
     return false
   end
-  local normalized = vim.trim(result.stdout)
-  return normalized ~= "" and normalized or false
+  local records, messages, pending = {}, {}, {}
+  for hash, message in result.stdout:gmatch("(%x+)%z(.-)%z") do
+    message = vim.trim(message)
+    records[#records + 1] = { hash = hash, message = message }
+    messages[#messages + 1] = message
+    pending[#pending + 1] = hash .. " │ " .. message:match("^[^\n]*")
+  end
+  if #records == 0 then
+    return false
+  end
+  local text = vim.trim(table.concat(messages, "\n\n"))
+  return {
+    records = records,
+    messages = text ~= "" and text or nil,
+    pending = vim.trim(table.concat(pending, "\n")),
+  }
 end
 
 local function tag_on_revision(path, rev)
@@ -138,75 +141,41 @@ local function tag_on_revision(path, rev)
     return nil
   end
   local key = path .. "@" .. rev
-  if revision_tag_cache[key] ~= nil then
-    return revision_tag_cache[key] or nil
+  local cache = revision_tag_cache
+  if cache[key] ~= nil then
+    return cache[key] or nil
   end
 
   local result = git.run(tag_on_revision_cmd(path, rev), { text = true }):wait()
-  revision_tag_cache[key] = parse_tag_on_revision(result)
-  return revision_tag_cache[key] or nil
+  cache[key] = parse_tag_on_revision(result)
+  return cache[key] or nil
+end
+
+local function commit_range(path, rev_before, rev_after)
+  local key = range_key(path, rev_before, rev_after)
+  if not key then
+    return nil
+  end
+  if commit_range_cache[key] == nil then
+    local result = git.run(commit_range_cmd(path, rev_before, rev_after), { text = true }):wait()
+    commit_range_cache[key] = parse_commit_range(result)
+  end
+  return commit_range_cache[key] or nil
 end
 
 local function commit_messages_between(path, rev_before, rev_after)
-  local key = range_key(path, rev_before, rev_after)
-  if not key then
-    return nil
-  end
-  if commit_messages_cache[key] ~= nil then
-    return commit_messages_cache[key] or nil
-  end
-
-  local result = git.run(commit_messages_cmd(path, rev_before, rev_after), { text = true }):wait()
-  commit_messages_cache[key] = parse_trimmed_or_false(result)
-  return commit_messages_cache[key] or nil
+  local range = commit_range(path, rev_before, rev_after)
+  return range and range.messages
 end
 
--- Per-commit `{ hash, message }` records for the range, newest first, where
--- `hash` is the short hash and `message` is the full commit message (subject +
--- body). Preserves commit boundaries so callers can attribute a breaking marker
--- to the specific commit that carries it (in subject OR body) and key it by
--- hash. Uses ASCII record/unit separators (RS \30, US \31) as delimiters.
 local function commit_records_between(path, rev_before, rev_after)
-  local key = range_key(path, rev_before, rev_after)
-  if not key then
-    return nil
-  end
-  if commit_records_cache[key] ~= nil then
-    return commit_records_cache[key] or nil
-  end
-
-  local result = git
-    .run({ "-C", path, "log", "--format=%h%x1f%s%n%b%x1e", rev_before .. ".." .. rev_after }, { text = true })
-    :wait()
-  if result.code ~= 0 or type(result.stdout) ~= "string" then
-    commit_records_cache[key] = false
-    return nil
-  end
-
-  local records = {}
-  for _, record in ipairs(vim.split(result.stdout, "\30", { trimempty = true })) do
-    local hash, message = record:match("^%s*(%x+)\31(.*)$")
-    if hash and hash ~= "" then
-      records[#records + 1] = { hash = hash, message = vim.trim(message or "") }
-    end
-  end
-
-  commit_records_cache[key] = #records > 0 and records or false
-  return commit_records_cache[key] or nil
+  local range = commit_range(path, rev_before, rev_after)
+  return range and range.records
 end
 
 local function pending_updates_between(path, rev_before, rev_after)
-  local key = range_key(path, rev_before, rev_after)
-  if not key then
-    return nil
-  end
-  if pending_updates_cache[key] ~= nil then
-    return pending_updates_cache[key] or nil
-  end
-
-  local result = git.run(pending_updates_cmd(path, rev_before, rev_after), { text = true }):wait()
-  pending_updates_cache[key] = parse_trimmed_or_false(result)
-  return pending_updates_cache[key] or nil
+  local range = commit_range(path, rev_before, rev_after)
+  return range and range.pending
 end
 
 -- Prefetch tags and commit text for an update row, skipping cached queries.
@@ -215,23 +184,13 @@ end
 function M.prefetch_range(path, rev_before, rev_after, done)
   local jobs = {}
 
-  local function queue(cmd, cache, key)
-    jobs[#jobs + 1] = function(job_done)
-      git.run(cmd, { text = true }, function(result)
-        cache[key] = parse_trimmed_or_false(result)
-        vim.schedule(job_done)
-      end)
-    end
-  end
-
-  local function queue_tag(rev)
-    local key = path .. "@" .. rev
-    if revision_tag_cache[key] ~= nil then
+  local function queue(cmd, cache, key, parse)
+    if cache[key] ~= nil then
       return
     end
     jobs[#jobs + 1] = function(job_done)
-      git.run(tag_on_revision_cmd(path, rev), { text = true }, function(result)
-        revision_tag_cache[key] = parse_tag_on_revision(result)
+      git.run(cmd, { text = true }, function(result)
+        cache[key] = parse(result)
         vim.schedule(job_done)
       end)
     end
@@ -239,20 +198,15 @@ function M.prefetch_range(path, rev_before, rev_after, done)
 
   if type(path) == "string" and path ~= "" then
     if type(rev_before) == "string" and rev_before ~= "" then
-      queue_tag(rev_before)
+      queue(tag_on_revision_cmd(path, rev_before), revision_tag_cache, path .. "@" .. rev_before, parse_tag_on_revision)
     end
-    if type(rev_after) == "string" and rev_after ~= "" then
-      queue_tag(rev_after)
+    if type(rev_after) == "string" and rev_after ~= "" and rev_after ~= rev_before then
+      queue(tag_on_revision_cmd(path, rev_after), revision_tag_cache, path .. "@" .. rev_after, parse_tag_on_revision)
     end
 
     local key = range_key(path, rev_before, rev_after)
     if key then
-      if commit_messages_cache[key] == nil then
-        queue(commit_messages_cmd(path, rev_before, rev_after), commit_messages_cache, key)
-      end
-      if pending_updates_cache[key] == nil then
-        queue(pending_updates_cmd(path, rev_before, rev_after), pending_updates_cache, key)
-      end
+      queue(commit_range_cmd(path, rev_before, rev_after), commit_range_cache, key, parse_commit_range)
     end
   end
 

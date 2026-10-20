@@ -169,8 +169,8 @@ t.describe("resolving an entry's declared version (resolve_entry_version)", func
   end)
 
   t.it("falls back to the version-policy's latest_tag range when nothing is declared", function()
-    local entry = { name = "x", specs = { {} } }
-    local policy = { plugins = { x = { strategy = "tags", latest_tag = "v2.3.0" } } }
+    local entry = { name = "x", src = "file:///x.git", specs = { {} } }
+    local policy = { schema = 4, plugins = { x = { src = entry.src, strategy = "tags", latest_tag = "v2.3.0" } } }
     local resolved = spec_mod.resolve_entry_version(entry, policy)
     t.assert.equals("table", type(resolved))
     t.assert.truthy(resolved:has(vim.version.parse("v2.9.0")))
@@ -239,12 +239,12 @@ t.describe("flattening module/spec lists (flatten_specs)", function()
     t.assert.truthy(entries.main.deps.dep)
   end)
 
-  t.it("does not add a dep edge for an optional table dependency", function()
+  t.it("keeps an optional dependency edge until merged enablement is resolved", function()
     local entries = spec_mod.flatten_specs({}, {
       { "owner/main", dependencies = { { "owner/dep", optional = true } } },
     })
     t.assert.truthy(entries.dep ~= nil)
-    t.assert.is_nil(entries.main.deps.dep)
+    t.assert.truthy(entries.main.deps.dep)
   end)
 
   t.it("disables an entry when enabled = false", function()

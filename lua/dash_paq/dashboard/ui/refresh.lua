@@ -2,6 +2,8 @@ local report = require("dash_paq.dashboard.report")
 local state = require("dash_paq.dashboard.state")
 local view = require("dash_paq.dashboard.ui.view")
 local rows = require("dash_paq.dashboard.ui.rows")
+local version = require("dash_paq.dashboard.analysis.version")
+local gitcmd = require("dash_paq.dashboard.analysis.gitcmd")
 
 local M = {}
 
@@ -18,6 +20,17 @@ local APPLY_YIELD_MS = 10
 -- batch), so an apply that runs while the user moves through the rows makes
 -- the cursor lag.
 local CURSOR_IDLE_MS = 300
+local operation_running = false
+local pending_operations = {}
+
+local function operation_done()
+  operation_running = false
+  local next_op = table.remove(pending_operations, 1)
+  if next_op then
+    operation_running = true
+    vim.schedule(next_op)
+  end
+end
 
 -- Stop and dispose the per-row spinner animation timer, if running.
 local function stop_spinner(ctx)
@@ -189,19 +202,12 @@ end
 --   online: fetch before resolving status
 --   apply: scheduled bulk mutation before status; raises abort the operation
 --   remove_on_done: remove rows instead of resolving their status
---   apply_rows(names): blocking checkout of fetched updates; returns ok, err
+--   before_apply(results): approve fetched updates before any checkout
+--   apply_rows(names, results): blocking checkout; returns per-name status/error
 --   apply_batch_size: maximum rows per checkout call (default 1)
 --   on_finalize(counts): cache updates before final rendering
 --   done_notify(counts): completion hook after final rendering
-function M.run_row_op(ctx, spec)
-  spec = spec or {}
-  -- A row op is already in flight: the visible spinners already convey "busy",
-  -- so silently ignore the repeat trigger instead of toasting.
-  if ctx.online_check_running then
-    return
-  end
-  ctx.online_check_running = true
-
+local function execute_row_op(ctx, spec)
   -- Set once the op has ended (finalized or aborted): late pipeline callbacks
   -- and drain steps then return without touching the dashboard.
   local finished = false
@@ -235,6 +241,7 @@ function M.run_row_op(ctx, spec)
   end)
   if not ok_setup then
     release()
+    operation_done()
     error(err_setup, 0)
   end
 
@@ -247,20 +254,28 @@ function M.run_row_op(ctx, spec)
   end
 
   local function finalize()
-    release()
-    if spec.on_finalize then
-      guarded(spec.on_finalize, counts)
-    end
-    state.write_persisted_state()
-    M.update_after_scan(ctx, current_name)
-    if spec.done_notify then
-      guarded(spec.done_notify, counts)
-    elseif counts.error > 0 then
-      vim.notify(
-        string.format("Plugin refresh failed for %d repo(s); see error rows", counts.error),
-        vim.log.levels.WARN
-      )
-    end
+    finished = true
+    gitcmd.invalidate_tags()
+    state.invalidate_version_flags()
+    version.refresh_version_flags_async(function()
+      release()
+      guarded(function()
+        if spec.on_finalize then
+          guarded(spec.on_finalize, counts)
+        end
+        state.write_persisted_state()
+        M.update_after_scan(ctx, current_name)
+        if spec.done_notify then
+          guarded(spec.done_notify, counts)
+        elseif counts.error > 0 then
+          vim.notify(
+            string.format("%d plugin(s) failed to refresh; see the failed rows", counts.error),
+            vim.log.levels.WARN
+          )
+        end
+      end)
+      operation_done()
+    end)
   end
 
   -- The status phase resolves each target row independently. For removals we
@@ -319,19 +334,16 @@ function M.run_row_op(ctx, spec)
         batch[#batch + 1] = result
         names[#names + 1] = result.name
       end
-      local ok_call, ok, err = pcall(spec.apply_rows, names)
-      if not ok_call then
-        -- `ok` holds the raised error.
-        ok, err = false, tostring(ok)
-      end
+      local ok_call, outcomes = pcall(spec.apply_rows, names, batch)
       for _, result in ipairs(batch) do
         local ok_row, err_row = pcall(function()
-          if ok then
+          local outcome = ok_call and type(outcomes) == "table" and outcomes[result.name]
+          if outcome and outcome.status == "same" then
             result.status = "same"
             result.rev_before = result.rev_after
           else
             result.status = "error"
-            result.error = err or "checkout failed"
+            result.error = outcome and outcome.error or (not ok_call and tostring(outcomes)) or "checkout failed"
           end
           apply_pipeline_result(ctx, result, counts)
         end)
@@ -364,7 +376,9 @@ function M.run_row_op(ctx, spec)
       -- Keep fetched rows pending until their checkout finishes.
       if spec.apply_rows and result.status == "update" then
         apply_queue[#apply_queue + 1] = result
-        drain_queue()
+        if not spec.before_apply then
+          drain_queue()
+        end
       else
         apply_pipeline_result(ctx, result, counts)
       end
@@ -378,6 +392,20 @@ function M.run_row_op(ctx, spec)
         return
       end
       pipeline_done = true
+      if spec.before_apply and #apply_queue > 0 then
+        local ok, approved = pcall(spec.before_apply, apply_queue)
+        if not ok or not approved then
+          for _, result in ipairs(apply_queue) do
+            if not ok then
+              result.status, result.error = "error", tostring(approved)
+            end
+            apply_pipeline_result(ctx, result, counts)
+          end
+          apply_queue = {}
+        else
+          drain_queue()
+        end
+      end
       maybe_finalize()
     end)
   end
@@ -391,6 +419,7 @@ function M.run_row_op(ctx, spec)
       ctx.rows = report.collect_dashboard_rows()
       view.render(ctx)
     end)
+    operation_done()
   end
 
   -- Defer so the spinner render paints before any blocking bulk mutation runs.
@@ -411,6 +440,22 @@ function M.run_row_op(ctx, spec)
     if not ok_phase then
       fail_op(err_phase)
     end
+  end
+end
+
+function M.run_row_op(ctx, spec)
+  if ctx.online_check_running then
+    return
+  end
+  ctx.online_check_running = true
+  local function run()
+    execute_row_op(ctx, spec or {})
+  end
+  if operation_running then
+    pending_operations[#pending_operations + 1] = run
+  else
+    operation_running = true
+    run()
   end
 end
 
@@ -436,6 +481,9 @@ function M.refresh(ctx, online)
 end
 
 function M.persist_ui_state(ctx)
+  if not ctx.bufnr or not vim.api.nvim_buf_is_valid(ctx.bufnr) then
+    return
+  end
   state.dashboard_ui_cache.filter_mode =
     state.normalize_mode(ctx.filter_mode, { all = true, updates = true, issues = true }, "all")
   state.dashboard_ui_cache.sort_mode = state.normalize_mode(ctx.sort_mode, { status = true, name = true }, "status")

@@ -16,18 +16,9 @@ local function parse_source_coordinates(src)
   end
 
   local normalized = vim.trim(src):gsub("/+$", "")
-  local host, owner, repo = normalized:match("^https?://([^/]+)/([^/]+)/([^/]+)%.git$")
-  if not host then
-    host, owner, repo = normalized:match("^https?://([^/]+)/([^/]+)/([^/]+)$")
-  end
-  if not host then
-    host, owner, repo = normalized:match("^git@([^:]+):([^/]+)/([^/]+)%.git$")
-  end
+  local host, owner, repo = normalized:match("^https?://([^/]+)/([^/]+)/([^/]+)$")
   if not host then
     host, owner, repo = normalized:match("^git@([^:]+):([^/]+)/([^/]+)$")
-  end
-  if not host then
-    host, owner, repo = normalized:match("^ssh://git@([^/]+)/([^/]+)/([^/]+)%.git$")
   end
   if not host then
     host, owner, repo = normalized:match("^ssh://git@([^/]+)/([^/]+)/([^/]+)$")
@@ -40,28 +31,7 @@ local function parse_source_coordinates(src)
   return host, owner, repo
 end
 
-local function source_to_compare_url(src, rev_before, rev_after)
-  if type(src) ~= "string" or src == "" or type(rev_before) ~= "string" or type(rev_after) ~= "string" then
-    return nil
-  end
-
-  local host, owner, repo = parse_source_coordinates(src)
-  if not host or not owner or not repo then
-    return nil
-  end
-
-  local template = configured_hosts[host]
-  if not template then
-    return nil
-  end
-  return ("https://%s/%s/%s/" .. template.compare):format(host, owner, repo, rev_before, rev_after)
-end
-
 local function source_to_repo_url(src)
-  if type(src) ~= "string" or src == "" then
-    return nil
-  end
-
   local host, owner, repo = parse_source_coordinates(src)
   if not host or not owner or not repo then
     return nil
@@ -69,42 +39,40 @@ local function source_to_repo_url(src)
   return ("https://%s/%s/%s"):format(host, owner, repo)
 end
 
-local function repo_to_compare_url(repo_url, from_ref, to_ref)
-  if type(repo_url) ~= "string" or repo_url == "" then
+local function repo_template(repo_url)
+  if type(repo_url) ~= "string" then
     return nil
   end
+  local host = repo_url:match("^https://([^/]+)/[^/]+/[^/]+$")
+  return host and configured_hosts[host]
+end
+
+local function repo_to_compare_url(repo_url, from_ref, to_ref)
   if type(from_ref) ~= "string" or from_ref == "" or type(to_ref) ~= "string" or to_ref == "" then
     return nil
   end
 
-  local host, owner, repo = repo_url:match("^https://([^/]+)/([^/]+)/([^/]+)$")
-  if not host or not owner or not repo then
-    return nil
-  end
-  local template = configured_hosts[host]
+  local template = repo_template(repo_url)
   if not template then
     return nil
   end
-  return (repo_url .. "/" .. template.compare):format(from_ref, to_ref)
+  return repo_url .. "/" .. template.compare:format(from_ref, to_ref)
+end
+
+local function source_to_compare_url(src, rev_before, rev_after)
+  return repo_to_compare_url(source_to_repo_url(src), rev_before, rev_after)
 end
 
 local function repo_to_commit_url(repo_url, hash)
-  if type(repo_url) ~= "string" or repo_url == "" then
-    return nil
-  end
   if type(hash) ~= "string" or not hash:match("^%x%x%x%x%x%x%x+$") then
     return nil
   end
 
-  local host, owner, repo = repo_url:match("^https://([^/]+)/([^/]+)/([^/]+)$")
-  if not host or not owner or not repo then
-    return nil
-  end
-  local template = configured_hosts[host]
+  local template = repo_template(repo_url)
   if not template then
     return nil
   end
-  return (repo_url .. "/" .. template.commit):format(hash)
+  return repo_url .. "/" .. template.commit:format(hash)
 end
 
 M.parse_source_coordinates = parse_source_coordinates

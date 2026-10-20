@@ -281,7 +281,7 @@ function M.flatten_specs(module_names, direct_specs, opts)
         end
       elseif type(dep) == "table" then
         local dep_entry = add_spec(dep, true)
-        if dep_entry and dep.optional ~= true then
+        if dep_entry then
           entry.deps[dep_entry.name] = true
         end
       end
@@ -429,38 +429,45 @@ end
 function M.resolve_entry_version(entry, version_policy)
   local version = nil
   local is_explicit = false
+  local star = false
   local is_force_branch = false
 
   for _, spec in ipairs(entry.specs) do
     if type(spec.commit) == "string" and spec.commit ~= "" then
       version = spec.commit
+      star = false
       is_explicit = true
     elseif type(spec.tag) == "string" and spec.tag ~= "" then
       version = spec.tag
+      star = false
       is_explicit = true
     elseif type(spec.branch) == "string" and spec.branch ~= "" then
       version = spec.branch
+      star = false
       is_explicit = true
     elseif spec.version == false then
       is_force_branch = true
     elseif spec.version ~= nil then
       version = spec.version
+      star = type(version) == "string" and vim.trim(version) == "*"
       is_explicit = true
     end
   end
 
   if is_force_branch then
-    return nil
+    return nil, false
   end
 
   if is_explicit then
-    return M.normalize_pack_version(version)
+    return M.normalize_pack_version(version), star
   end
 
   local policy_plugins = type(version_policy) == "table" and version_policy.plugins or nil
   local policy_item = type(policy_plugins) == "table" and policy_plugins[entry.name]
   if
     type(policy_item) == "table"
+    and version_policy.schema == require("dash_paq.policy").SCHEMA
+    and require("dash_paq.git").same_remote(policy_item.src, entry.src)
     and policy_item.strategy == "tags"
     and type(policy_item.latest_tag) == "string"
     and policy_item.latest_tag ~= ""

@@ -21,12 +21,14 @@ M.dashboard_ui_cache = {
 
 M.persisted_state_loaded = false
 M.declared_names_cache = {}
+M.declared_names_published = false
 M.declared_versions_cache = {}
 M.dev_plugin_paths_cache = {}
 M.dev_capable_cache = {}
 M.version_flags_cache = {}
 M.version_flags_scan_running = false
 M.version_flags_scanned = false
+M.version_flags_generation = 0
 -- hrtime of the last cursor line change in any dashboard window; shared so a
 -- reopened dashboard still holds the applies of an op started in a closed one.
 M.last_cursor_move = nil
@@ -49,6 +51,7 @@ end
 -- either an array of names or a set (`name = true`). Calling with `nil` or a
 -- non-table resets the cache to empty (which disables orphan flagging).
 function M.set_declared_plugin_names(names)
+  M.declared_names_published = type(names) == "table"
   if type(names) ~= "table" then
     M.declared_names_cache = {}
     return
@@ -76,8 +79,13 @@ end
 -- set (so pre-setup dashboard access doesn't mis-classify rows).
 function M.set_declared_plugin_versions(versions)
   M.declared_versions_cache = type(versions) == "table" and versions or {}
+  M.invalidate_version_flags()
+end
+
+function M.invalidate_version_flags()
   M.version_flags_cache = {}
   M.version_flags_scanned = false
+  M.version_flags_generation = M.version_flags_generation + 1
 end
 
 -- name -> dev dir; shown as "local" rows.

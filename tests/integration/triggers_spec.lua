@@ -88,8 +88,49 @@ vim.cmd(
   "autocmd BufEnter * let g:dash_paq_test_vimscript_bufenter = get(g:, 'dash_paq_test_vimscript_bufenter', 0) + 1"
 )
 
+local existing_buffers = { vim.api.nvim_create_buf(true, false), vim.api.nvim_create_buf(true, false) }
+for _, buf in ipairs(existing_buffers) do
+  vim.bo[buf].filetype = "existinglang"
+end
+local new_event_count = 0
+local existing_key_count = 0
+local count_received
 require("dash_paq").setup({
   spec = {
+    {
+      dir = dirfixture.new("count", {}),
+      name = "count",
+      cmd = "FixtureCount",
+      config = function()
+        vim.api.nvim_create_user_command("FixtureCount", function(ctx)
+          count_received = ctx.count
+        end, { count = 0 })
+      end,
+    },
+    {
+      dir = dirfixture.new("leave", {}),
+      name = "leave",
+      event = { "CmdlineLeave", pattern = ":" },
+      config = function()
+        vim.api.nvim_create_autocmd("CmdlineLeave", {
+          group = vim.api.nvim_create_augroup("fixture_leave", {}),
+          pattern = ":",
+          callback = function()
+            new_event_count = new_event_count + 1
+          end,
+        })
+      end,
+    },
+    {
+      dir = dirfixture.new("existing", {}),
+      name = "existing",
+      keys = { { "<F9>", ft = "existinglang" } },
+      config = function()
+        vim.keymap.set("n", "<F9>", function()
+          existing_key_count = existing_key_count + 1
+        end)
+      end,
+    },
     {
       dir = cmd_dir,
       name = "cmdplug",
@@ -498,5 +539,60 @@ t.describe("a cmd-triggered entry's plugin/ defines the real command with Vimscr
     t.assert.equals(1, vim.g.dash_paq_vimcmdsrc_ran)
   end)
 end)
+
+t.describe("WHEN the first deferred command has a count beyond the buffer length", function()
+  t.it("SHOULD forward the count without interpreting it as a line range", function()
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { "one line" })
+    vim.cmd("42FixtureCount")
+    t.assert.equals(42, count_received)
+  end)
+end)
+
+t.describe("WHEN a deferred pattern event is outside the old event allowlist", function()
+  t.it("SHOULD replay the original match to the new handler", function()
+    vim.api.nvim_exec_autocmds("CmdlineLeave", { pattern = ":" })
+    t.assert.equals(1, new_event_count)
+  end)
+end)
+
+t.describe("WHEN matching buffers exist before key registration", function()
+  t.it("SHOULD load from their buffer-local key and remove all stubs", function()
+    vim.api.nvim_set_current_buf(existing_buffers[1])
+    vim.api.nvim_feedkeys(vim.keycode("<F9>"), "mtx", false)
+    t.assert.equals(1, existing_key_count)
+    t.assert.same({}, vim.api.nvim_buf_get_keymap(existing_buffers[2], "n"))
+  end)
+end)
+
+local source_cases = {
+  { dir = "plugin", method = "source_plugin_files" },
+  { dir = "after/plugin", method = "source_entry_after" },
+  { dir = "ftdetect", method = "source_entry_ftdetect" },
+}
+for _, case in ipairs(source_cases) do
+  t.describe("WHEN sourcing " .. case.dir, function()
+    t.it("SHOULD run Vimscript before Lua regardless of filename order", function()
+      local root = dirfixture.new("order", {
+        [case.dir .. "/a.lua"] = 'vim.g.source_order = (vim.g.source_order or "") .. "lua;"',
+        [case.dir .. "/z.vim"] = 'let g:source_order = get(g:, "source_order", "") . "vim;"',
+      })
+      vim.g.source_order = ""
+      local tr = require("dash_paq.loader.triggers").new({ group = vim.api.nvim_create_augroup("fixture_order", {}) })
+      tr[case.method]({ dir = root })
+      t.assert.equals("vim;lua;", vim.g.source_order)
+    end)
+
+    t.it("SHOULD source scripts excluded by wildignore", function()
+      local root = dirfixture.new("ignored", { [case.dir .. "/a.lua"] = "vim.g.ignored_loaded = true" })
+      vim.g.ignored_loaded = false
+      local tr = require("dash_paq.loader.triggers").new({ group = vim.api.nvim_create_augroup("fixture_ignore", {}) })
+      local old = vim.o.wildignore
+      vim.o.wildignore = "*.lua"
+      tr[case.method]({ dir = root })
+      vim.o.wildignore = old
+      t.assert.truthy(vim.g.ignored_loaded)
+    end)
+  end)
+end
 
 t.finish()

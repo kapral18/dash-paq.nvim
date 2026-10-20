@@ -102,4 +102,31 @@ t.describe("opts.hosts configures a custom/additional git-forge host", function(
   end)
 end)
 
+t.describe("WHEN URL components resemble formatting or Git suffixes", function()
+  url.configure()
+
+  t.it("SHOULD strip only the transport suffix from a repository named repo.git", function()
+    t.assert.equals("https://github.com/owner/repo.git", url.source_to_repo_url("git@github.com:owner/repo.git.git"))
+  end)
+
+  t.it("SHOULD keep percent-encoded repository paths in compare links", function()
+    t.assert.equals(
+      "https://github.com/owner/my%20repo/compare/aaa...bbb",
+      url.repo_to_compare_url("https://github.com/owner/my%20repo", "aaa", "bbb")
+    )
+  end)
+
+  t.it("SHOULD keep percent-encoded repository paths in commit links", function()
+    t.assert.equals(
+      "https://github.com/owner/my%20repo/commit/abc1234",
+      url.repo_to_commit_url("https://github.com/owner/my%20repo", "abc1234")
+    )
+  end)
+
+  t.it("SHOULD reject a source compare link without both revisions", function()
+    t.assert.is_nil(url.source_to_compare_url("https://github.com/owner/repo.git", "", "bbb"))
+    t.assert.is_nil(url.source_to_compare_url("https://github.com/owner/repo.git", "aaa", ""))
+  end)
+end)
+
 t.finish()

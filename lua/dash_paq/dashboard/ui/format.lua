@@ -18,74 +18,34 @@ function M.spinner_frames(use_nerd_font)
 end
 
 function M.icons(use_nerd_font)
-  if use_nerd_font then
-    return {
-      update = "\u{f062}",
-      same = "\u{f058}",
-      error = "\u{f057}",
-      unknown = "\u{f059}",
-      orphan = "\u{f1f8}",
-      drift = "\u{f0e2}",
-      risky = "\u{f071}",
-      ["local"] = "\u{f07c}",
-      risk_break = "!",
-      risk_safe = "+",
-      risk_unknown = "-",
-      link_diff = "diff",
-      link_repo = "repo",
-    }
-  end
   return {
-    update = "U",
-    same = "=",
-    error = "!",
-    unknown = "?",
-    orphan = "O",
-    drift = "D",
-    risky = "W",
-    ["local"] = "L",
+    update = use_nerd_font and "\u{f062}" or "U",
+    same = use_nerd_font and "\u{f058}" or "=",
+    error = use_nerd_font and "\u{f057}" or "E",
+    unknown = use_nerd_font and "\u{f059}" or "?",
+    orphan = use_nerd_font and "\u{f1f8}" or "O",
+    drift = use_nerd_font and "\u{f0e2}" or "D",
+    risky = use_nerd_font and "\u{f071}" or "W",
+    ["local"] = use_nerd_font and "\u{f07c}" or "L",
     risk_break = "!",
-    risk_safe = "+",
-    risk_unknown = "-",
-    link_diff = "diff",
-    link_repo = "repo",
   }
 end
 
-function M.status_icons(icons)
-  return {
-    update = icons.update,
-    same = icons.same,
-    error = icons.error,
-    unknown = icons.unknown,
-    orphan = icons.orphan,
-    drift = icons.drift,
-    risky = icons.risky,
-    ["local"] = icons["local"],
-  }
-end
+-- Plain-words note after the version, so a row explains itself without a
+-- legend. Empty when the status says it all.
+local NOTES = {
+  drift = "drifted from spec",
+  risky = "non-release tag",
+  orphan = "not in spec",
+  error = "failed",
+  unknown = "not checked",
+}
 
-function M.risk_label(ctx, row)
-  if row.status ~= "update" then
-    return "-"
+function M.note_cell(row)
+  if row.status == "update" then
+    return row.breaking == true and "possibly breaking" or ""
   end
-  if row.breaking == true then
-    return ctx.icons.risk_break
-  end
-  if row.breaking == false then
-    return ctx.icons.risk_safe
-  end
-  return ctx.icons.risk_unknown
-end
-
-function M.links_cell(ctx, row)
-  if row.diff_url then
-    return ctx.icons.link_diff
-  end
-  if row.repo_url then
-    return ctx.icons.link_repo
-  end
-  return "-"
+  return NOTES[row.status] or ""
 end
 
 function M.truncate_display(text, max_width)
@@ -123,6 +83,20 @@ function M.pad_cell(text, width)
   end
   return value .. string.rep(" ", pad)
 end
+
+-- Plain words for each status (and the breaking signal): singular, plural.
+-- Shared by the summary counts and the details title.
+M.status_labels = {
+  update = { "update", "updates" },
+  breaking = { "possibly breaking", "possibly breaking" },
+  error = { "failed", "failed" },
+  drift = { "drifted", "drifted" },
+  risky = { "non-release tag", "non-release tags" },
+  orphan = { "not in spec", "not in spec" },
+  unknown = { "not checked", "not checked" },
+  same = { "up to date", "up to date" },
+  ["local"] = { "local", "local" },
+}
 
 function M.version_cell(row)
   if row.status == "local" then

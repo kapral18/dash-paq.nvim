@@ -18,16 +18,20 @@ local function top_level_modules(entry)
   local root = triggers_mod.resolve_root(entry)
   local names = {}
   if type(root) ~= "string" or root == "" then
-    return names
+    return nil
   end
   local handle = vim.uv.fs_scandir(vim.fs.joinpath(root, "lua"))
   if not handle then
-    return names
+    return nil
   end
   while true do
     local name, ftype = vim.uv.fs_scandir_next(handle)
     if not name then
       break
+    end
+    if ftype == "link" then
+      local stat = vim.uv.fs_stat(vim.fs.joinpath(root, "lua", name))
+      ftype = stat and stat.type
     end
     if ftype == "file" and name:match("%.lua$") then
       names[#names + 1] = name:sub(1, -5)
@@ -45,21 +49,34 @@ local function is_eligible(entry, state)
   return entry ~= nil and entry.enabled and state ~= nil and state.status ~= "loaded" and state.status ~= "loading"
 end
 
--- Scan on the first require miss, including entries mid-load whose dependencies
--- may require them. The first entry in dependency order owns a shared module name.
+-- Loaded entries retain provider precedence; entries mid-load may be required
+-- by their dependencies. Shared namespaces keep dependency order.
 local function build_top_map(ctx)
   local map = {}
+  local unavailable = {}
   for _, entry in ipairs(ctx.sorted) do
     local state = ctx.entry_state[entry.name]
-    if entry.enabled and state and state.status ~= "loaded" then
-      for _, top in ipairs(top_level_modules(entry)) do
-        if not map[top] then
-          map[top] = entry.name
-        end
+    if entry.enabled and state then
+      local names = top_level_modules(entry)
+      if not names and state.status ~= "loaded" then
+        unavailable[#unavailable + 1] = entry
+      end
+      for _, top in ipairs(names or {}) do
+        map[top] = map[top] or {}
+        map[top][#map[top] + 1] = entry.name
       end
     end
   end
-  return map
+  return map, unavailable
+end
+
+local function module_path(entry, modname)
+  local root = triggers_mod.resolve_root(entry)
+  if type(root) ~= "string" or root == "" then
+    return nil
+  end
+  local lua_dir = vim.fs.joinpath(root, "lua")
+  return package.searchpath(modname, lua_dir .. "/?.lua;" .. lua_dir .. "/?/init.lua")
 end
 
 -- Loader for `modname` straight from a mid-load `entry`'s own `lua/` dir, or
@@ -72,8 +89,7 @@ local function loading_entry_loader(entry, modname)
   if type(root) ~= "string" or root == "" or vim.tbl_contains(vim.opt.rtp:get(), root) then
     return nil
   end
-  local lua_dir = vim.fs.joinpath(root, "lua")
-  local path = package.searchpath(modname, lua_dir .. "/?.lua;" .. lua_dir .. "/?/init.lua")
+  local path = module_path(entry, modname)
   if not path then
     return nil
   end
@@ -91,10 +107,24 @@ local function searcher(modname)
     return nil
   end
   if not current.top_map then
-    current.top_map = build_top_map(current)
+    current.top_map, current.unavailable = build_top_map(current)
+  else
+    for _, entry in ipairs(current.unavailable) do
+      local state = current.entry_state[entry.name]
+      if entry.enabled and state and state.status ~= "loaded" and top_level_modules(entry) then
+        current.top_map, current.unavailable = build_top_map(current)
+        break
+      end
+    end
   end
   local top = modname:match("^[^.]+")
-  local entry_name = top and current.top_map[top]
+  local entry_name
+  for _, name in ipairs(top and current.top_map[top] or {}) do
+    if module_path(current.entries[name], modname) then
+      entry_name = name
+      break
+    end
+  end
   if not entry_name then
     return nil
   end
@@ -106,7 +136,9 @@ local function searcher(modname)
   if not is_eligible(entry, state) then
     return nil
   end
-  current.load_entry(entry_name, "require:" .. modname)
+  if not current.load_entry(entry_name, "require:" .. modname) then
+    return nil
+  end
   -- A dependency's plugin/after file may have required `modname` while the entry loaded (see
   -- `loading_entry_loader`), which already cached it. Returning the message below would make `require()`
   -- evaluate the module a second time from rtp and split its state (e.g. two nvim-cmp cores).

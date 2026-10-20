@@ -43,4 +43,23 @@ t.describe("pipeline on_each positions", function()
   end)
 end)
 
+t.describe("WHEN a queued refresh target has been deleted", function()
+  t.it("SHOULD report its failure and finish the pipeline", function()
+    require("dash_paq.dashboard.state").dashboard_config.fetch_concurrency = 1
+    local missing = vim.pack.get({ "pb" }, { info = false })[1].path
+    vim.fn.delete(missing, "rf")
+    local results, finished = {}, false
+    report.run_refresh_pipeline({ "pa", "pb" }, true, function(result)
+      results[result.name] = result.status
+    end, function()
+      finished = true
+    end)
+    t.wait_until(function()
+      return finished
+    end, 3000, "refresh was stranded")
+    t.assert.equals("same", results.pa)
+    t.assert.equals("error", results.pb)
+  end)
+end)
+
 t.finish()

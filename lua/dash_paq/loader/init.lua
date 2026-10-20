@@ -9,6 +9,7 @@ local trace = require("dash_paq.loader.trace")
 local policy = require("dash_paq.policy")
 local modules_mod = require("dash_paq.loader.modules")
 local notify = require("dash_paq.notify")
+local git = require("dash_paq.git")
 
 local notify_err = notify.err
 local notify_warn = notify.warn
@@ -117,7 +118,7 @@ local function process_shell_queue()
     return
   end
   shell_build_running = true
-  vim.system({ "/bin/sh", "-c", item.build }, { cwd = item.path, text = true }, function(result)
+  local function finish(result)
     -- vim.system's on_exit fires off the main loop; hop back before touching
     -- notify/UI state or resuming the (possibly ex-command/API-calling) next build.
     vim.schedule(function()
@@ -128,7 +129,11 @@ local function process_shell_queue()
       item.on_done()
       process_shell_queue()
     end)
-  end)
+  end
+  local ok, err = pcall(vim.system, { "/bin/sh", "-c", item.build }, { cwd = item.path, text = true }, finish)
+  if not ok then
+    finish({ code = -1, stderr = tostring(err) })
+  end
 end
 
 -- Runs one build and calls `on_done` exactly once, whether it succeeded,
@@ -255,13 +260,76 @@ local function resolve_dev_entries(entries, dev_cfg)
   return dev_plugin_paths, dev_capable
 end
 
--- `owner/repo` expands to `…/repo.git`; a bare `vim.pack.add` of `…/repo`
--- names the same remote.
-local function same_remote(a, b)
-  local function strip(src)
-    return (src:gsub("/+$", ""):gsub("%.git$", ""))
+local function install_specs(pack_specs)
+  -- Initialize without publishing new specs or prompting for missing lockfile
+  -- clones. Snapshot before adding specs, which masks an existing source.
+  local ok_snapshot, plugins = pcall(function()
+    vim.pack.add({}, { confirm = false, load = function() end })
+    return vim.pack.get(nil, { info = false })
+  end)
+  if not ok_snapshot then
+    notify_err("Cannot read installed plugins: " .. tostring(plugins))
+    return
   end
-  return strip(a) == strip(b)
+  local installed = {}
+  for _, plugin in ipairs(plugins) do
+    installed[plugin.spec.name] = plugin
+  end
+  local unchanged, replaced = {}, {}
+  for _, spec in ipairs(pack_specs) do
+    local old = installed[spec.name]
+    if not old or git.same_remote(old.spec.src, spec.src) then
+      unchanged[#unchanged + 1] = spec
+    else
+      -- Keep the working tree outside opt, including local and untracked edits.
+      local backup =
+        vim.fs.joinpath(vim.fs.dirname(vim.fs.dirname(old.path)), spec.name .. ".backup-" .. tostring(vim.uv.hrtime()))
+      local moved, move_err = vim.uv.fs_rename(old.path, backup)
+      if not moved then
+        notify_err("Cannot preserve " .. spec.name .. " before replacing its source: " .. tostring(move_err))
+      else
+        local ok, err = pcall(function()
+          vim.pack.del({ spec.name }, { force = true })
+          vim.pack.add({ spec }, { confirm = false, load = function() end })
+        end)
+        local ok_get, info = pcall(vim.pack.get, { spec.name }, { info = false })
+        if ok and ok_get and info[1] and vim.fn.isdirectory(old.path) == 1 then
+          replaced[#replaced + 1] = spec.name
+          notify_warn("Previous checkout of " .. spec.name .. " preserved at " .. backup)
+        else
+          -- A failed native install removes its partial clone. Never overwrite
+          -- a remaining path: keep the backup available for recovery instead.
+          local restored, restore_err
+          if vim.uv.fs_lstat(old.path) then
+            restore_err = "replacement path still exists"
+          else
+            restored, restore_err = vim.uv.fs_rename(backup, old.path)
+          end
+          notify_err(
+            "Source replacement failed for "
+              .. spec.name
+              .. ": "
+              .. tostring(err or "install failed")
+              .. (
+                restored and "; previous checkout restored, restart to register it"
+                or ("; previous checkout preserved at " .. backup .. ": " .. tostring(restore_err))
+              )
+          )
+        end
+      end
+    end
+  end
+  if #unchanged > 0 then
+    local ok, err = pcall(vim.pack.add, unchanged, { confirm = false, load = function() end })
+    if not ok then
+      notify_err("vim.pack.add failed during install: " .. tostring(err))
+    end
+  end
+  if #replaced > 0 then
+    vim.schedule(function()
+      vim.notify("Reinstalled (src changed): " .. table.concat(replaced, ", "), vim.log.levels.INFO)
+    end)
+  end
 end
 
 local function load_version_policy()
@@ -339,20 +407,13 @@ function M.setup(config, dashboard)
 
       if entry.src and not entry.is_dev then
         local pack_spec = { src = entry.src, name = entry.name }
-        local version = spec_mod.resolve_entry_version(entry, version_policy)
+        local version, star = spec_mod.resolve_entry_version(entry, version_policy)
         if version ~= nil then
           pack_spec.version = version
         end
         pack_specs[#pack_specs + 1] = pack_spec
 
-        -- Literal `version = "*"` is lost after resolving to a VersionRange.
-        local raw_star = false
-        for _, spec in ipairs(entry.specs) do
-          if spec.version == "*" then
-            raw_star = true
-          end
-        end
-        declared_versions[entry.name] = { resolved = version, star = raw_star }
+        declared_versions[entry.name] = { resolved = version, star = star }
       end
     end
   end
@@ -515,12 +576,7 @@ function M.setup(config, dashboard)
   local policy_was_empty = type(version_policy.plugins) ~= "table" or next(version_policy.plugins) == nil
 
   if #pack_specs > 0 then
-    -- A no-op `load` keeps `vim.pack.add` from touching 'runtimepath' itself
-    -- (this loader does that); an install failure here must not abort setup.
-    local ok_add, err_add = pcall(vim.pack.add, pack_specs, { confirm = false, load = function() end })
-    if not ok_add then
-      notify_err("vim.pack.add failed during install: " .. tostring(err_add))
-    end
+    install_specs(pack_specs)
   end
 
   if #pack_specs > 0 and config.version_policy then
@@ -544,13 +600,9 @@ function M.setup(config, dashboard)
 
   -- A conditionally-disabled spec still counts as declared, not an orphan.
   local retain_pack_names = {}
-  local spec_src = {}
   for _, entry in ipairs(sorted) do
     if entry.src and not entry.is_dev then
       retain_pack_names[entry.name] = true
-      if entry.enabled then
-        spec_src[entry.name] = entry.src
-      end
     end
   end
 
@@ -560,33 +612,6 @@ function M.setup(config, dashboard)
     dashboard.set_declared_plugin_versions(declared_versions)
     dashboard.set_dev_plugin_paths(dev_plugin_paths)
     dashboard.set_dev_capable_plugins(dev_capable)
-  end
-
-  -- Re-clone when a declared plugin's remote moved (not orphan cleanup).
-  local ok_get, all_plugins = pcall(vim.pack.get, nil, { info = false })
-  if ok_get and type(all_plugins) == "table" then
-    local to_reinstall = {}
-    for _, p in ipairs(all_plugins) do
-      local name = p.spec and p.spec.name
-      if type(name) == "string" and name ~= "" then
-        if
-          retain_pack_names[name]
-          and spec_src[name]
-          and p.spec.src
-          and not same_remote(spec_src[name], p.spec.src)
-        then
-          to_reinstall[#to_reinstall + 1] = name
-        end
-      end
-    end
-
-    if #to_reinstall > 0 then
-      pcall(vim.pack.del, to_reinstall, { force = true })
-      pcall(vim.pack.add, pack_specs, { confirm = false, load = function() end })
-      vim.schedule(function()
-        vim.notify("Reinstalled (src changed): " .. table.concat(to_reinstall, ", "), vim.log.levels.INFO)
-      end)
-    end
   end
 
   local triggers = triggers_mod.new({ group = AUGROUP, notify_err = notify_err })
@@ -607,12 +632,37 @@ function M.setup(config, dashboard)
     end,
   })
 
+  -- Check the dependency graph before consuming any trigger. A dependency may
+  -- define the parent's command, so those stubs still come off before loading.
+  local function directories_available(entry, seen)
+    local status = entry_state[entry.name].status
+    if seen[entry.name] or status == "loaded" or status == "loading" then
+      return true
+    end
+    seen[entry.name] = true
+    local root = triggers_mod.resolve_root(entry)
+    if (entry.src or entry.dir) and (not root or vim.fn.isdirectory(root) ~= 1) then
+      notify_err("Plugin directory unavailable for " .. entry.name .. ": " .. tostring(root or entry.dir))
+      return false
+    end
+    for dep_name in pairs(entry.deps) do
+      local dep = entries[dep_name]
+      if dep and dep.enabled and not directories_available(dep, seen) then
+        return false
+      end
+    end
+    return true
+  end
+
   -- The only place anything loads: guards re-entrancy, then walks the
   -- algorithm every route (startup, dependency, `:DashPaq load`, a build hook, or
   -- a cmd/event/ft/keys trigger) shares.
   local function apply_entry(entry, reason)
     local state = entry_state[entry.name]
     if not state or state.status == "loading" or state.status == "loaded" then
+      return false
+    end
+    if not directories_available(entry, {}) then
       return false
     end
     state.status = "loading"

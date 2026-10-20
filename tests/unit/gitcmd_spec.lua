@@ -3,6 +3,20 @@ local t = require("runner")
 local gitfixture = require("support.gitfixture")
 local gitcmd = require("dash_paq.dashboard.analysis.gitcmd")
 
+local function count_git_calls(fn)
+  local git = require("dash_paq.git")
+  local original = git.run
+  local count = 0
+  git.run = function(...)
+    count = count + 1
+    return original(...)
+  end
+  local ok, err = pcall(fn)
+  git.run = original
+  assert(ok, err)
+  return count
+end
+
 t.describe("two release tags point at the same revision (tag tie-break)", function()
   local remote = gitfixture.new_remote("tietest")
   gitfixture.commit(remote, "feat: initial", { ["a.txt"] = "1" })
@@ -99,24 +113,19 @@ t.describe("gitcmd.prefetch_range fills caches so the sync calls spawn nothing",
   local after = gitfixture.commit(remote, "feat: add thing\n\nBREAKING CHANGE: yes", { ["b.txt"] = "2" })
   gitfixture.tag(remote, "v2.0.0")
 
-  -- Independent reference values from a fresh clone: its cache keys (keyed by
-  -- path) are guaranteed cold, so these calls prove what the SYNC functions
-  -- would produce on their own, for comparison against the prefetched path.
-  local mirror = gitfixture.tmp_dir("prefetchrange-mirror")
-  vim.fn.delete(mirror, "rf")
-  gitfixture.run({ "git", "clone", "--quiet", remote.work, mirror })
-  local expected_before_tag = gitcmd.tag_on_revision(mirror, before)
-  local expected_after_tag = gitcmd.tag_on_revision(mirror, after)
-  local expected_messages = gitcmd.commit_messages_between(mirror, before, after)
-  local expected_pending = gitcmd.pending_updates_between(mirror, before, after)
-
   local done_count = 0
-  gitcmd.prefetch_range(remote.work, before, after, function()
-    done_count = done_count + 1
+  local prefetch_calls = count_git_calls(function()
+    gitcmd.prefetch_range(remote.work, before, after, function()
+      done_count = done_count + 1
+    end)
+    t.wait_until(function()
+      return done_count > 0
+    end, 5000, "prefetch_range's done was never called")
   end)
-  t.wait_until(function()
-    return done_count > 0
-  end, 5000, "prefetch_range's done was never called")
+
+  t.it("SHOULD read both revision tags and the commit range in three Git queries", function()
+    t.assert.equals(3, prefetch_calls)
+  end)
 
   t.it("calls done exactly once", function()
     -- Give any spurious extra completion a chance to land before asserting.
@@ -126,36 +135,24 @@ t.describe("gitcmd.prefetch_range fills caches so the sync calls spawn nothing",
     t.assert.equals(1, done_count)
   end)
 
-  local system_calls = 0
-  local orig_system = vim.system
-  vim.system = function(...)
-    system_calls = system_calls + 1
-    return orig_system(...)
-  end
-
-  local sync_before_tag = gitcmd.tag_on_revision(remote.work, before)
-  local sync_after_tag = gitcmd.tag_on_revision(remote.work, after)
-  local sync_messages = gitcmd.commit_messages_between(remote.work, before, after)
-  local sync_pending = gitcmd.pending_updates_between(remote.work, before, after)
-
-  vim.system = orig_system
+  local sync_before_tag, sync_after_tag, sync_messages, sync_pending, sync_records
+  local system_calls = count_git_calls(function()
+    sync_before_tag = gitcmd.tag_on_revision(remote.work, before)
+    sync_after_tag = gitcmd.tag_on_revision(remote.work, after)
+    sync_messages = gitcmd.commit_messages_between(remote.work, before, after)
+    sync_pending = gitcmd.pending_updates_between(remote.work, before, after)
+    sync_records = gitcmd.commit_records_between(remote.work, before, after)
+  end)
 
   t.it("spawns no git process for the sync calls once prefetched (pure cache hits)", function()
     t.assert.equals(0, system_calls)
   end)
 
-  t.it("sync results equal the values a cold sync-only run produces", function()
-    t.assert.equals(expected_before_tag, sync_before_tag)
-    t.assert.equals(expected_after_tag, sync_after_tag)
-    t.assert.equals(expected_messages, sync_messages)
-    -- Not a strict string comparison against `expected_pending`: git's `%h`
-    -- abbreviation length is derived from the repo's total object count,
-    -- which an incremental fetch/clone can grow differently than a single
-    -- fresh clone even for the identical commit. Shape + subject is what
-    -- matters here; hash uniqueness itself is covered by the "hash/message
-    -- records" describe block above.
-    t.assert.match("^%x%x%x%x%x%x%x+ │ feat: add thing$", sync_pending or "")
-    t.assert.truthy(expected_pending ~= nil)
+  t.it("SHOULD preserve the commit subject and breaking footer", function()
+    t.assert.equals("feat: add thing\nBREAKING CHANGE: yes", sync_messages)
+    t.assert.match("^%x%x%x%x%x%x%x+ │ feat: add thing$", sync_pending)
+    t.assert.equals(1, #sync_records)
+    t.assert.equals("feat: add thing\nBREAKING CHANGE: yes", sync_records[1].message)
   end)
 
   t.it("picked the semver-greatest tag at each revision (parity with tag_on_revision's own logic)", function()
@@ -234,6 +231,92 @@ t.describe("gitcmd.prefetch_range with no revisions to prefetch", function()
       return done_count > 0
     end, 5000, "prefetch_range's done was never called")
     t.assert.equals(1, done_count)
+  end)
+end)
+
+t.describe("WHEN a commit range is read synchronously through a symlink", function()
+  t.it("SHOULD share one Git query across messages, pending rows, and commit records", function()
+    local remote = gitfixture.new_remote("log-café")
+    local before = gitfixture.commit(remote, "chore: initial", {})
+    gitfixture.commit(remote, "docs: explain café", {})
+    local after = gitfixture.commit(remote, "fix: café\n\nBREAKING CHANGE: new name", {})
+    local link = remote.work .. "-link"
+    assert(vim.uv.fs_symlink(remote.work, link))
+    local messages, pending, records
+
+    local calls = count_git_calls(function()
+      pending = gitcmd.pending_updates_between(link, before, after)
+      records = gitcmd.commit_records_between(link, before, after)
+      messages = gitcmd.commit_messages_between(link, before, after)
+    end)
+
+    t.assert.equals(1, calls)
+    t.assert.equals("fix: café\nBREAKING CHANGE: new name\n\ndocs: explain café", messages)
+    t.assert.match("^%x%x%x%x%x%x%x+ │ fix: café\n%x%x%x%x%x%x%x+ │ docs: explain café$", pending)
+    t.assert.equals(2, #records)
+    t.assert.equals("fix: café\nBREAKING CHANGE: new name", records[1].message)
+    t.assert.equals("docs: explain café", records[2].message)
+  end)
+
+  t.it("SHOULD share an empty range without inventing pending commits", function()
+    local remote = gitfixture.new_remote("empty-log")
+    local head = gitfixture.commit(remote, "chore: initial", {})
+    local messages, pending, records
+
+    local calls = count_git_calls(function()
+      records = gitcmd.commit_records_between(remote.work, head, head)
+      messages = gitcmd.commit_messages_between(remote.work, head, head)
+      pending = gitcmd.pending_updates_between(remote.work, head, head)
+    end)
+
+    t.assert.equals(1, calls)
+    t.assert.is_nil(records)
+    t.assert.is_nil(messages)
+    t.assert.is_nil(pending)
+  end)
+end)
+
+t.describe("WHEN commit messages contain record separators", function()
+  t.it("SHOULD preserve the complete message in every projection", function()
+    local remote = gitfixture.new_remote("log-separators")
+    local before = gitfixture.commit(remote, "chore: initial", {})
+    local after = gitfixture.commit(remote, "fix: one\30two\31three\n\nBody\30with\31separators", {})
+
+    local records = gitcmd.commit_records_between(remote.work, before, after)
+
+    t.assert.equals(1, #records)
+    t.assert.equals("fix: one\30two\31three\nBody\30with\31separators", records[1].message)
+    t.assert.equals(
+      "fix: one\30two\31three\nBody\30with\31separators",
+      gitcmd.commit_messages_between(remote.work, before, after)
+    )
+    t.assert.match(
+      "^%x%x%x%x%x%x%x+ │ fix: one\30two\31three$",
+      gitcmd.pending_updates_between(remote.work, before, after)
+    )
+  end)
+end)
+
+t.describe("WHEN both prefetch endpoints are the same revision", function()
+  t.it("SHOULD query its tags only once and settle an empty range", function()
+    local remote = gitfixture.new_remote("prefetch-same")
+    local head = gitfixture.commit(remote, "chore: initial", {})
+    gitfixture.tag(remote, "v1.0.0")
+    local done_count = 0
+
+    local calls = count_git_calls(function()
+      gitcmd.prefetch_range(remote.work, head, head, function()
+        done_count = done_count + 1
+      end)
+      t.wait_until(function()
+        return done_count > 0
+      end)
+    end)
+
+    t.assert.equals(2, calls)
+    t.assert.equals(1, done_count)
+    t.assert.equals("v1.0.0", gitcmd.tag_on_revision(remote.work, head))
+    t.assert.is_nil(gitcmd.pending_updates_between(remote.work, head, head))
   end)
 end)
 

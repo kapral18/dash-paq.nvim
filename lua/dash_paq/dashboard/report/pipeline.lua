@@ -19,13 +19,16 @@ local M = {}
 local function git_capture(path, args, callback)
   local cmd = { "-C", path, "-c", "gc.auto=0" }
   vim.list_extend(cmd, args)
-  git.run(cmd, { text = true }, function(out)
+  local ok, err = pcall(git.run, cmd, { text = true }, function(out)
     if out.code ~= 0 then
       callback(nil, vim.trim(out.stderr or out.stdout or "git error"))
       return
     end
     callback((out.stdout or ""):gsub("\n+$", ""), nil)
   end)
+  if not ok then
+    callback(nil, tostring(err))
+  end
 end
 
 -- strict, like vim.pack
@@ -150,7 +153,7 @@ local function refresh_one(target, online, done)
     return
   end
 
-  git.run({
+  local ok, err = pcall(git.run, {
     "-c",
     "gc.auto=0",
     "fetch",
@@ -164,8 +167,12 @@ local function refresh_one(target, online, done)
       finalize("error", nil, nil, vim.trim(out.stderr or out.stdout or "git fetch failed"))
       return
     end
+    gitcmd.invalidate_tags()
     compute_status()
   end)
+  if not ok then
+    finalize("error", nil, nil, tostring(err))
+  end
 end
 
 -- Run the per-plugin refresh pipeline concurrently.

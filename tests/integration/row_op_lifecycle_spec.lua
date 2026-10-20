@@ -58,7 +58,11 @@ local function start_op(spec_extra)
         h.applied[#h.applied + 1] = name
       end
       h.batches[#h.batches + 1] = #names
-      return true
+      local outcomes = {}
+      for _, name in ipairs(names) do
+        outcomes[name] = { status = "same" }
+      end
+      return outcomes
     end,
     on_finalize = function(counts)
       h.finalized = h.finalized + 1
@@ -338,6 +342,60 @@ t.describe("a batch whose apply_rows raises", function()
   t.it("marks every row of the batch as an error row and still finalizes once", function()
     t.assert.same({ update = 0, same = 0, error = 3 }, h.counts)
     t.assert.equals(1, h.finalized)
+  end)
+end)
+
+t.describe("WHEN a dashboard is reopened while an older refresh runs", function()
+  t.it("SHOULD prevent the old result from replacing a newer result", function()
+    local callbacks = {}
+    report.run_refresh_pipeline = function(_, _, each, done)
+      callbacks[#callbacks + 1] = { each = each, done = done }
+    end
+    local first, second = new_ctx(), new_ctx()
+    refresh.run_row_op(first, { names = { "race" } })
+    vim.api.nvim_buf_delete(first.bufnr, { force = true })
+    refresh.run_row_op(second, { names = { "race" } })
+    local function deliver(callback, status, before)
+      callback.each({
+        name = "race",
+        path = "/dev/null",
+        source = "git",
+        status = status,
+        rev_before = before,
+        rev_after = "new",
+      })
+      callback.done()
+    end
+    -- Complete overlapping operations newest-first; serialized operations run in launch order.
+    if callbacks[2] then
+      deliver(callbacks[2], "same", "new")
+      deliver(callbacks[1], "update", "old")
+    else
+      deliver(callbacks[1], "update", "old")
+      t.wait_until(function()
+        return callbacks[2] ~= nil
+      end, 1000, "queued refresh never started")
+      deliver(callbacks[2], "same", "new")
+    end
+    report.run_refresh_pipeline = orig_pipeline
+    t.assert.equals("same", state.pack_report_cache.plugins.race.status)
+    t.assert.equals("new", state.pack_report_cache.plugins.race.rev_before)
+  end)
+
+  t.it("SHOULD retain preferences saved by the replacement window", function()
+    local each, done
+    report.run_refresh_pipeline = function(_, _, on_each, on_done)
+      each, done = on_each, on_done
+    end
+    local first, second = new_ctx(), new_ctx()
+    refresh.run_row_op(first, { names = { "prefs" } })
+    vim.api.nvim_buf_delete(first.bufnr, { force = true })
+    second.filter_mode = "updates"
+    refresh.persist_ui_state(second)
+    each({ name = "prefs", path = "/dev/null", source = "git", status = "same" })
+    done()
+    report.run_refresh_pipeline = orig_pipeline
+    t.assert.equals("updates", state.dashboard_ui_cache.filter_mode)
   end)
 end)
 

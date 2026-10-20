@@ -70,6 +70,14 @@ t.describe("a plugin is installed but neither active nor declared by any spec", 
   end)
 end)
 
+t.describe("WHEN the loader publishes an empty declared set", function()
+  t.it("SHOULD still flag inactive plugins as orphaned", function()
+    state.set_declared_plugin_names({})
+    t.assert.truthy(rows.collect_dashboard_row("undeclared").is_orphan)
+    t.assert.falsy(rows.collect_dashboard_row("bootstrapped").is_orphan)
+  end)
+end)
+
 t.describe("WHEN the last installed plugins are removed", function()
   t.it("SHOULD discard cached reports before a plugin with the same name is re-added", function()
     state.pack_report_cache.plugins = { bootstrapped = { status = "error", pending_updates = "old failure" } }

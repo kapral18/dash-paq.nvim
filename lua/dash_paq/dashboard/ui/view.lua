@@ -4,6 +4,8 @@ local render = require("dash_paq.dashboard.ui.render")
 
 local M = {}
 
+M.CONTENT_WIDTH = render.CONTENT_WIDTH
+
 function M.new_context(opts)
   local cfg = state.dashboard_config
   local use_nerd_font = cfg.ascii ~= true
@@ -12,7 +14,6 @@ function M.new_context(opts)
     use_nerd_font = use_nerd_font,
     fast_scroll_mode = cfg.fast_scroll ~= false,
     icons = icons,
-    status_icon = fmt.status_icons(icons),
     row_by_line = {},
     line_by_name = {},
     first_data_line = 1,

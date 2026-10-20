@@ -40,8 +40,35 @@ function M.export(destination)
   return true, expanded
 end
 
--- Copy a lockfile from `source` on top of the live lockfile. Checks that the
--- JSON decodes to a table with a `plugins` table before overwriting. Returns `ok, err_or_path`.
+local function valid_record(name, record)
+  -- Native lock synchronization joins each name to opt and can remove that path.
+  if type(name) ~= "string" or name == "" or name == "." or name == ".." or name:find("[/\\:%z]") then
+    return false
+  end
+  if
+    type(record) ~= "table"
+    or type(record.src) ~= "string"
+    or record.src == ""
+    or record.src:find("%z")
+    or type(record.rev) ~= "string"
+    or not record.rev:match("^%x+$")
+  then
+    return false
+  end
+  if record.version == nil then
+    return true
+  end
+  if type(record.version) ~= "string" or record.version:find("%z") then
+    return false
+  end
+  if record.version:match("^'.+'$") then
+    return true
+  end
+  local ok, range = pcall(vim.version.range, record.version)
+  return ok and range ~= nil
+end
+
+-- Validate native records before replacing the live lockfile. Returns ok, err_or_path.
 function M.import(source)
   if type(source) ~= "string" or source == "" then
     return false, "source path is required"
@@ -63,6 +90,11 @@ function M.import(source)
   local ok_decode, decoded = pcall(vim.json.decode, table.concat(lines, "\n"))
   if not ok_decode or type(decoded) ~= "table" or type(decoded.plugins) ~= "table" then
     return false, "source file does not match the vim.pack lockfile schema"
+  end
+  for name, record in pairs(decoded.plugins) do
+    if not valid_record(name, record) then
+      return false, "invalid plugin record in source lockfile: " .. tostring(name)
+    end
   end
 
   local dest = M.path()

@@ -57,8 +57,135 @@ local dbl_child_dir = dirfixture.new("reqdblchild", {
 -- Disabled: `require("reqdisabledplug")` must never load it, despite providing a matching `lua/` module.
 local disabled_dir = dirfixture.new("reqdisabledplug", { ["lua/reqdisabledplug.lua"] = "return {}\n" })
 
+local shared_a = dirfixture.new("shared_a", { ["lua/shared/one.lua"] = 'return "one"' })
+local shared_b = dirfixture.new("shared_b", { ["lua/shared/two.lua"] = 'return "two"' })
+local linked = dirfixture.new("linked", {})
+local linked_target =
+  dirfixture.new("linked_target", { ["linked.lua"] = 'return "linked"', ["tree/init.lua"] = 'return "tree"' })
+vim.fn.mkdir(linked .. "/lua", "p")
+assert(vim.uv.fs_symlink(linked_target .. "/linked.lua", linked .. "/lua/linked.lua"))
+assert(vim.uv.fs_symlink(linked_target .. "/tree", linked .. "/lua/linked_tree"))
+assert(vim.uv.fs_symlink(linked_target .. "/absent", linked .. "/lua/broken.lua"))
+local missing = dirfixture.tmp_dir("retry") .. "/later"
+local optional_child = dirfixture.new("optional_child", dirfixture.marker_plugin_files("optional_child"))
+local optional_parent = dirfixture.new("optional_parent", { ["lua/optional_parent.lua"] = "return true" })
+local optional_seen = false
+local late_root = dirfixture.tmp_dir("late-require")
+local late_target = late_root .. "/restored"
+local late_link = late_root .. "/linked"
+assert(vim.uv.fs_symlink(late_target, late_link))
+local retry_parent = dirfixture.new("retry_parent", {})
+local retry_middle = dirfixture.new("retry_middle", {})
+local retry_dependency = dirfixture.tmp_dir("retry-dependency") .. "/restored"
+local retry_config_calls = 0
+local primary_provider = dirfixture.new("primary_provider", {
+  ["lua/primary_first.lua"] = 'return "primary"',
+  ["lua/provider.lua"] = 'return "primary"',
+})
+local duplicate_provider = dirfixture.new("duplicate_provider", {
+  ["lua/provider.lua"] = 'return "duplicate"',
+  ["plugin/init.lua"] = "vim.g.duplicate_provider_loaded = true",
+})
+local restored_provider = dirfixture.tmp_dir("restored-provider") .. "/later"
+local config_only_dependency = dirfixture.new("config-only-dependency", {})
+local config_only_order = {}
+local config_only_manual_calls = 0
+local config_only_event_calls = 0
+local config_only_disabled_dependency_loaded = false
+local config_only_retry_dependency = dirfixture.new("config-only-déps", {})
+local config_only_retry_calls = 0
+local config_only_command_calls = 0
+local config_only_dependency_seen = false
+
 require("dash_paq").setup({
   spec = {
+    {
+      name = "k18-lsp-progress",
+      dependencies = {
+        {
+          name = "config_only_dependency",
+          dir = config_only_dependency,
+          config = function()
+            config_only_order[#config_only_order + 1] = "dependency"
+          end,
+        },
+      },
+      config = function()
+        config_only_order[#config_only_order + 1] = "config"
+      end,
+    },
+    {
+      name = "config_only_manual",
+      lazy = true,
+      config = function()
+        config_only_manual_calls = config_only_manual_calls + 1
+      end,
+    },
+    {
+      name = "config_only_event",
+      event = { { event = "User", pattern = "ConfigOnlyEvent" } },
+      config = function()
+        config_only_event_calls = config_only_event_calls + 1
+      end,
+    },
+    {
+      name = "config_only_disabled_dependency",
+      dependencies = { { name = "disabled_missing", dir = "", enabled = false } },
+      config = function()
+        config_only_disabled_dependency_loaded = true
+      end,
+    },
+    {
+      name = "config_only_retry",
+      cmd = "ConfigOnlyRetry",
+      dependencies = {
+        {
+          name = "config_only_middle",
+          dependencies = { { name = "config_only_leaf", dir = config_only_retry_dependency } },
+        },
+      },
+      config = function()
+        config_only_retry_calls = config_only_retry_calls + 1
+        config_only_dependency_seen = vim.g.config_only_dependency_ready == true
+        vim.api.nvim_create_user_command("ConfigOnlyRetry", function()
+          config_only_command_calls = config_only_command_calls + 1
+        end, {})
+      end,
+    },
+    { dir = primary_provider, name = "primary_provider", lazy = true },
+    { dir = duplicate_provider, name = "duplicate_provider", lazy = true },
+    { dir = restored_provider, name = "restored_provider", lazy = true },
+    { dir = late_link, name = "late_require", lazy = true },
+    {
+      dir = retry_parent,
+      name = "retry_parent",
+      cmd = "LateDependencyCmd",
+      dependencies = {
+        {
+          dir = retry_middle,
+          name = "retry_middle",
+          dependencies = { { dir = retry_dependency, name = "retry_leaf" } },
+        },
+      },
+      config = function()
+        retry_config_calls = retry_config_calls + 1
+        assert(vim.g.retry_dependency_ready, "dependency must load before config")
+      end,
+    },
+    {
+      dir = optional_parent,
+      name = "optional_parent",
+      lazy = true,
+      dependencies = { { dir = optional_child, name = "optional_child", optional = true } },
+      config = function()
+        optional_seen = vim.tbl_contains(_G.DASH_PAQ_TEST_LOG, "optional_child")
+      end,
+    },
+    { dir = optional_child, name = "optional_child", lazy = true },
+    { dir = shared_a, name = "shared_a", lazy = true },
+    { dir = shared_b, name = "shared_b", lazy = true },
+    { dir = linked, name = "linked", lazy = true },
+    { dir = missing, name = "retry", lazy = true },
     {
       dir = event_dir,
       name = "reqeventplug",
@@ -198,6 +325,129 @@ t.describe("a require that loads the parent while its dependency also requires i
 
   t.it("returns the cached module", function()
     t.assert.truthy(mod == package.loaded["reqdblparent"])
+  end)
+end)
+
+t.describe("WHEN deferred plugins share a Lua namespace", function()
+  t.it("SHOULD load the provider of each distinct module", function()
+    t.assert.equals("one", require("shared.one"))
+    t.assert.equals("two", require("shared.two"))
+  end)
+end)
+
+t.describe("WHEN a deferred module is a symlink", function()
+  t.it("SHOULD load through a linked Lua file", function()
+    t.assert.equals("linked", require("linked"))
+  end)
+
+  t.it("SHOULD load through a linked module directory", function()
+    t.assert.equals("tree", require("linked_tree"))
+  end)
+
+  t.it("SHOULD leave a broken link unresolved", function()
+    t.assert.raises(function()
+      require("broken")
+    end, "not found")
+  end)
+end)
+
+t.describe("WHEN an unavailable directory appears after a failed load", function()
+  t.it("SHOULD permit a later load and report success only then", function()
+    local notes = {}
+    local original_notify = vim.notify
+    vim.notify = function(msg)
+      notes[#notes + 1] = msg
+    end
+    vim.cmd("DashPaq load retry")
+    local first = table.concat(notes, "\n")
+    dirfixture.write(missing, "plugin/init.lua", "vim.g.retry_loaded = true")
+    vim.cmd("DashPaq load retry")
+    vim.notify = original_notify
+    t.assert.truthy(vim.g.retry_loaded)
+    t.assert.falsy(first:find("retry loaded", 1, true))
+  end)
+end)
+
+t.describe("WHEN an optional dependency has another required spec", function()
+  t.it("SHOULD load it before configuring the parent", function()
+    require("optional_parent")
+    t.assert.truthy(optional_seen)
+  end)
+end)
+
+t.describe("WHEN an unavailable require provider becomes readable", function()
+  t.it("SHOULD retry discovery through a restored directory symlink", function()
+    t.assert.raises(function()
+      require("late_require")
+    end, "not found")
+    dirfixture.write(late_target, "lua/late_require.lua", 'return "restored"')
+    t.assert.equals("restored", require("late_require"))
+  end)
+end)
+
+t.describe("WHEN a transitive dependency is unavailable", function()
+  t.it("SHOULD keep the parent command retryable until the dependency appears", function()
+    vim.cmd("LateDependencyCmd")
+    local calls_before_retry = retry_config_calls
+    local trigger_before_retry = vim.fn.exists(":LateDependencyCmd")
+    dirfixture.write(retry_dependency, "plugin/init.lua", {
+      "vim.g.retry_dependency_ready = true",
+      'vim.api.nvim_create_user_command("LateDependencyCmd", function() vim.g.retry_dependency_command = true end, {})',
+    })
+    vim.cmd("LateDependencyCmd")
+    t.assert.equals(0, calls_before_retry)
+    t.assert.equals(2, trigger_before_retry)
+    t.assert.equals(1, retry_config_calls)
+    t.assert.truthy(vim.g.retry_dependency_command)
+  end)
+end)
+
+t.describe("WHEN restoring a Lua root rebuilds module discovery", function()
+  t.it("SHOULD preserve an already-loaded provider without loading a duplicate", function()
+    t.assert.equals("primary", require("primary_first"))
+    dirfixture.write(restored_provider, "lua/restored_provider.lua", "return true")
+    require("restored_provider")
+    t.assert.equals("primary", require("provider"))
+    t.assert.falsy(vim.g.duplicate_provider_loaded)
+  end)
+end)
+
+t.describe("WHEN a named entry has no src or dir", function()
+  t.it("SHOULD configure it at startup after its filesystem dependency", function()
+    t.assert.same({ "dependency", "config" }, config_only_order)
+  end)
+
+  t.it("SHOULD load a manually deferred entry only once", function()
+    t.assert.equals(0, config_only_manual_calls)
+    vim.cmd("DashPaq load config_only_manual")
+    vim.cmd("DashPaq load config_only_manual")
+    t.assert.equals(1, config_only_manual_calls)
+  end)
+
+  t.it("SHOULD configure an event-deferred entry only once", function()
+    t.assert.equals(0, config_only_event_calls)
+    vim.api.nvim_exec_autocmds("User", { pattern = "ConfigOnlyEvent" })
+    vim.api.nvim_exec_autocmds("User", { pattern = "ConfigOnlyEvent" })
+    t.assert.equals(1, config_only_event_calls)
+  end)
+
+  t.it("SHOULD ignore a disabled dependency with no directory", function()
+    t.assert.truthy(config_only_disabled_dependency_loaded)
+  end)
+
+  t.it("SHOULD keep its command retryable while a transitive filesystem dependency is missing", function()
+    t.assert.equals(0, vim.fn.delete(config_only_retry_dependency, "d"))
+    vim.cmd("ConfigOnlyRetry")
+    local calls_before_retry = config_only_retry_calls
+    local trigger_before_retry = vim.fn.exists(":ConfigOnlyRetry")
+    dirfixture.write(config_only_retry_dependency, "plugin/init.lua", "vim.g.config_only_dependency_ready = true")
+    vim.cmd("ConfigOnlyRetry")
+    vim.cmd("ConfigOnlyRetry")
+    t.assert.equals(0, calls_before_retry)
+    t.assert.equals(2, trigger_before_retry)
+    t.assert.truthy(config_only_dependency_seen)
+    t.assert.equals(1, config_only_retry_calls)
+    t.assert.equals(2, config_only_command_calls)
   end)
 end)
 

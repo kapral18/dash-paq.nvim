@@ -79,6 +79,7 @@ t.describe("the `U` op updates 3 plugins whose vim.pack.update blocks by pumping
     vim.wait(50, function()
       return false
     end)
+    orig_pack_update(...)
     concurrent = concurrent - 1
   end
 
@@ -128,7 +129,7 @@ t.describe("the `U` op updates 3 plugins whose vim.pack.update blocks by pumping
   end)
 end)
 
--- apply_rows is documented to return ok, err rather than raise, but the drain loop pcalls it anyway and
+-- apply_rows is documented to return per-name outcomes rather than raise, but the drain loop pcalls it anyway and
 -- must still finalize (and clear online_check_running) even if it does raise.
 gitfixture.commit(remotes.alpha, "feat: one more commit", { ["more2.txt"] = "z" })
 gitfixture.push(remotes.alpha)
@@ -138,7 +139,7 @@ t.wait_until(function()
   return ctx.online_check_running == false
 end, 10000, "refresh before the raising apply_rows never finished")
 
-t.describe("apply_rows raises instead of returning ok, err", function()
+t.describe("apply_rows raises instead of returning per-name outcomes", function()
   t.it("has detected alpha as pending an update again", function()
     local statuses = {}
     for _, row in ipairs(ctx.rows or {}) do
@@ -232,6 +233,7 @@ t.describe("the `U` op separates applies with a real event-loop yield, not a bac
     vim.wait(20, function()
       return false
     end)
+    orig_pack_update(...)
     concurrent = concurrent - 1
     sentinel_fired = false
     local uv = vim.uv
@@ -307,6 +309,7 @@ t.describe("closing the dashboard buffer mid-op does not leak the step timer", f
       -- quitting the window mid-refresh.
       pcall(vim.api.nvim_buf_delete, close_bufnr, { force = true })
     end
+    orig_pack_update(...)
   end
 
   operations.update_by_names(close_ctx, names, "none", "noop")
@@ -428,6 +431,7 @@ t.describe("apply_batch_size = 2 with 3 pending updates", function()
   local orig_pack_update = vim.pack.update
   vim.pack.update = function(list, opts)
     calls[#calls + 1] = { names = vim.deepcopy(list), opts = vim.deepcopy(opts) }
+    return orig_pack_update(list, opts)
   end
   operations.update_by_names(ctx, names, "none", "noop")
   t.wait_until(function()
@@ -458,6 +462,87 @@ t.describe("apply_batch_size = 2 with 3 pending updates", function()
 
   t.it("counts every applied row", function()
     t.assert.equals(#names, state.pack_report_cache.last_applied_count)
+  end)
+end)
+
+t.describe("WHEN native checkout fails for one plugin in an update", function()
+  t.it("SHOULD report the failed row and count only successful checkouts", function()
+    gitfixture.commit(remotes.alpha, "fix: locked update", {})
+    gitfixture.push(remotes.alpha)
+    gitfixture.commit(remotes.beta, "fix: successful update", {})
+    gitfixture.push(remotes.beta)
+    refresh.refresh(ctx, true)
+    t.wait_until(function()
+      return not ctx.online_check_running
+    end, 5000, "refresh incomplete")
+    local alpha = vim.pack.get({ "alpha" }, { info = false })[1].path
+    local lock = alpha .. "/.git/index.lock"
+    vim.fn.writefile({ "test lock" }, lock)
+    operations.update_by_names(ctx, { "alpha", "beta" })
+    t.wait_until(function()
+      return not ctx.online_check_running
+    end, 5000, "partial update incomplete")
+    vim.fn.delete(lock)
+    t.assert.equals("error", report.collect_dashboard_row("alpha").status)
+    t.assert.equals("same", report.collect_dashboard_row("beta").status)
+    t.assert.equals(1, state.pack_report_cache.last_applied_count)
+  end)
+end)
+
+t.describe("WHEN a breaking commit arrives after the last dashboard scan", function()
+  t.it("SHOULD ask about the fetched target before changing HEAD", function()
+    gitfixture.commit(remotes.alpha, "fix: safe pending commit", {})
+    gitfixture.push(remotes.alpha)
+    refresh.refresh(ctx, true)
+    t.wait_until(function()
+      return not ctx.online_check_running
+    end, 5000, "risk baseline incomplete")
+    local path = vim.pack.get({ "alpha" }, { info = false })[1].path
+    local before = gitfixture.run({ "git", "-C", path, "rev-parse", "HEAD" })
+    gitfixture.commit(remotes.alpha, "feat!: change public behavior", {})
+    gitfixture.push(remotes.alpha)
+    local confirmations = 0
+    local confirm = vim.fn.confirm
+    vim.fn.confirm = function()
+      confirmations = confirmations + 1
+      return 2
+    end
+    state.dashboard_config.skip_risk_confirm = false
+    operations.update_by_names(ctx, { "alpha" })
+    t.wait_until(function()
+      return not ctx.online_check_running
+    end, 5000, "risk check incomplete")
+    vim.fn.confirm = confirm
+    state.dashboard_config.skip_risk_confirm = true
+    t.assert.equals(1, confirmations)
+    t.assert.equals(before, gitfixture.run({ "git", "-C", path, "rev-parse", "HEAD" }))
+    t.assert.equals("update", report.collect_dashboard_row("alpha").status)
+  end)
+end)
+
+t.describe("WHEN another checkout reaches a queued update's target", function()
+  t.it("SHOULD show the target as current without counting another apply", function()
+    refresh.refresh(ctx, true)
+    t.wait_until(function()
+      return not ctx.online_check_running
+    end, 5000, "race setup incomplete")
+    local pipeline = report.run_refresh_pipeline
+    local previous_time = state.pack_report_cache.last_applied_at
+    local previous_count = state.pack_report_cache.last_applied_count
+    report.run_refresh_pipeline = function(targets, online, each, done)
+      pipeline(targets, online, each, function(...)
+        vim.pack.update({ "alpha" }, { offline = true, force = true })
+        done(...)
+      end)
+    end
+    operations.update_by_names(ctx, { "alpha" })
+    t.wait_until(function()
+      return not ctx.online_check_running
+    end, 5000, "queued checkout incomplete")
+    report.run_refresh_pipeline = pipeline
+    t.assert.equals("same", report.collect_dashboard_row("alpha").status)
+    t.assert.equals(previous_time, state.pack_report_cache.last_applied_at)
+    t.assert.equals(previous_count, state.pack_report_cache.last_applied_count)
   end)
 end)
 

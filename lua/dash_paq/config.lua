@@ -24,9 +24,7 @@ end
 
 M.defaults = {
   dashboard = {
-    width_ratio = 0.68,
     height_ratio = 0.68,
-    min_width = 84,
     min_height = 18,
     margin = 6,
     refresh_on_open = true,

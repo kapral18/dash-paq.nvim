@@ -68,8 +68,9 @@ local function run(cmd)
   def.impl(vim.list_slice(fargs, 2), { bang = cmd.bang, raw = raw })
 end
 
--- Completes `:DashPaq <sub> <args>`; `cmdline` is up to the cursor.
-function M.complete(arglead, cmdline)
+-- Neovim supplies the whole command line and a byte offset for the cursor.
+function M.complete(arglead, cmdline, cursorpos)
+  cmdline = cmdline:sub(1, cursorpos or #cmdline)
   local rest = cmdline:match("^%s*" .. COMMAND .. "!?%s+(.*)$")
   if not rest then
     return {}

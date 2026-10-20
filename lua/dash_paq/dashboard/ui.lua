@@ -26,14 +26,12 @@ end
 local function open_popup_window(ctx)
   local cfg = state.dashboard_config
   local total_lines = vim.o.lines - vim.o.cmdheight
-  local width_ratio = math.max(0.45, math.min(0.98, tonumber(cfg.width_ratio) or defaults.width_ratio))
   local height_ratio = math.max(0.45, math.min(0.98, tonumber(cfg.height_ratio) or defaults.height_ratio))
-  local min_width = tonumber(cfg.min_width) or defaults.min_width
   local min_height = tonumber(cfg.min_height) or defaults.min_height
   local margin = math.max(2, tonumber(cfg.margin) or defaults.margin)
 
-  local width =
-    math.max(1, math.min(math.max(min_width, math.floor(vim.o.columns * width_ratio)), vim.o.columns - margin))
+  -- As wide as the table and header; narrower windows scroll horizontally.
+  local width = math.max(1, math.min(view.CONTENT_WIDTH, vim.o.columns - margin))
   local height =
     math.max(1, math.min(math.max(min_height, math.floor(total_lines * height_ratio)), total_lines - margin))
   local row = math.floor((total_lines - height) / 2)
@@ -43,8 +41,6 @@ local function open_popup_window(ctx)
     relative = "editor",
     style = "minimal",
     border = "rounded",
-    title = " dash-paq dashboard ",
-    title_pos = "center",
     row = row,
     col = col,
     width = width,

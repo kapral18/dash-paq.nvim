@@ -1,22 +1,6 @@
 local t = require("runner")
 local version = require("dash_paq.dashboard.analysis.version")
 
-t.describe("classifying a commit-hash-shaped string", function()
-  t.it("accepts a 7+ char hex string", function()
-    t.assert.truthy(version.is_commit_string("abc1234"))
-    t.assert.truthy(version.is_commit_string("deadbeefdeadbeef"))
-  end)
-
-  t.it("rejects a short hex string", function()
-    t.assert.falsy(version.is_commit_string("abc12"))
-  end)
-
-  t.it("rejects a branch/tag name", function()
-    t.assert.falsy(version.is_commit_string("main"))
-    t.assert.falsy(version.is_commit_string("v1.2.3"))
-  end)
-end)
-
 t.describe("classifying a release-shaped tag (strict shape)", function()
   t.it("accepts vMAJOR.MINOR.PATCH", function()
     t.assert.truthy(version.is_release_tag("v1.2.3"))
@@ -47,21 +31,40 @@ t.describe("computing spec-vs-disk version drift", function()
     t.assert.falsy(version.compute_version_drift(range, { rev = "abc", tags = { "v1.5.0" } }))
   end)
 
-  t.it("compares a declared commit against the checkout rev (prefix match)", function()
-    t.assert.falsy(version.compute_version_drift("abc1234", { rev = "abc1234def", tags = {} }))
-    t.assert.truthy(version.compute_version_drift("abc1234", { rev = "zzzzzzz", tags = {} }))
+  t.it("compares the resolved commit against the checkout", function()
+    t.assert.falsy(version.compute_version_drift("abc1234", { rev = "abc1234def", target_rev = "abc1234def" }))
+    t.assert.truthy(version.compute_version_drift("abc1234", { rev = "zzzzzzz", target_rev = "abc1234def" }))
   end)
 
   t.it("does not flag drift for a plain branch name absent from tags", function()
-    t.assert.falsy(version.compute_version_drift("main", { rev = "abc", tags = {} }))
+    t.assert.falsy(version.compute_version_drift("main", { rev = "abc", tags = {}, branches = { "main" } }))
   end)
 
   t.it("flags drift for a tag-shaped string absent from on-disk tags", function()
-    t.assert.truthy(version.compute_version_drift("v1.2.3", { rev = "abc", tags = { "v1.0.0" } }))
+    t.assert.truthy(version.compute_version_drift("v1.2.3", { rev = "abc", target_rev = "def", tags = { "v1.0.0" } }))
   end)
 
   t.it("does not flag drift when the declared tag is present on disk", function()
-    t.assert.falsy(version.compute_version_drift("v1.2.3", { rev = "abc", tags = { "v1.2.3" } }))
+    t.assert.falsy(version.compute_version_drift("v1.2.3", { rev = "abc", target_rev = "abc", tags = { "v1.2.3" } }))
+  end)
+
+  t.it("SHOULD accept a resolved date tag even though its name looks like a commit", function()
+    t.assert.falsy(
+      version.compute_version_drift(
+        "20261019",
+        { rev = "abc1234def", target_rev = "abc1234def", tags = { "20261019" } }
+      )
+    )
+  end)
+
+  t.it("SHOULD honor a tag that shadows the current commit prefix", function()
+    t.assert.truthy(version.compute_version_drift("abc1234", { rev = "abc1234def", target_rev = "fff123456" }))
+  end)
+
+  t.it("SHOULD accept a fully qualified tag ref resolved by Git", function()
+    t.assert.falsy(
+      version.compute_version_drift("refs/tags/v1.2.3", { rev = "abc", target_rev = "abc", tags = { "v1.2.3" } })
+    )
   end)
 end)
 

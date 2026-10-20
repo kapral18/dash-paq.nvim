@@ -42,16 +42,6 @@ local function snapshot_event_groups(event_name)
   return groups
 end
 
--- Events whose `pattern` is a match tag, not a filename glob: replayed via
--- `pattern = ev.match` instead of `buffer = ev.buf`.
-local PATTERN_MATCH_EVENTS = {
-  User = true,
-  CmdlineEnter = true,
-  ColorScheme = true,
-  OptionSet = true,
-  ModeChanged = true,
-}
-
 -- Re-fire `event_name` for each augroup new since `before_groups`. A
 -- groupless autocmd cannot be targeted this way and will not see the replay.
 local function replay_new_groups(event_name, before_groups, ev)
@@ -59,16 +49,25 @@ local function replay_new_groups(event_name, before_groups, ev)
   if not ok then
     return
   end
-  local exec_opts_base = PATTERN_MATCH_EVENTS[event_name] and { pattern = ev.match } or { buffer = ev.buf }
   local fired = {}
   for _, au in ipairs(list) do
     if au.group and not before_groups[au.group] and not fired[au.group] then
       fired[au.group] = true
-      local exec_opts = vim.tbl_extend("force", { modeline = false, data = ev.data }, exec_opts_base)
-      exec_opts.group = au.group
-      pcall(vim.api.nvim_exec_autocmds, event_name, exec_opts)
+      pcall(vim.api.nvim_buf_call, ev.buf, function()
+        vim.api.nvim_exec_autocmds(event_name, {
+          pattern = ev.match,
+          group = au.group,
+          modeline = false,
+          data = ev.data,
+        })
+      end)
     end
   end
+end
+
+-- Native runtime loading sources Vimscript before Lua and ignores 'wildignore'.
+local function script_paths(pattern)
+  return vim.list_extend(vim.fn.glob(pattern .. ".vim", true, true), vim.fn.glob(pattern .. ".lua", true, true))
 end
 
 function M.new(opts)
@@ -140,7 +139,7 @@ function M.new(opts)
     end
     did_ftdetect[root] = true
 
-    local paths = vim.fn.glob(root .. "/ftdetect/*.{vim,lua}", false, true)
+    local paths = script_paths(root .. "/ftdetect/*")
     if #paths == 0 then
       return
     end
@@ -187,7 +186,7 @@ function M.new(opts)
     if type(root) ~= "string" or root == "" or vim.fn.isdirectory(root) ~= 1 then
       return
     end
-    local plugin_paths = vim.fn.glob(root .. "/plugin/**/*.{vim,lua}", false, true)
+    local plugin_paths = script_paths(root .. "/plugin/**/*")
     for _, p in ipairs(plugin_paths) do
       local ok, err = pcall(vim.cmd.source, { p, magic = { file = false } })
       if not ok then
@@ -224,7 +223,7 @@ function M.new(opts)
     if type(root) ~= "string" or root == "" or vim.fn.isdirectory(root) ~= 1 then
       return
     end
-    local after_paths = vim.fn.glob(root .. "/after/plugin/**/*.{vim,lua}", false, true)
+    local after_paths = script_paths(root .. "/after/plugin/**/*")
     for _, p in ipairs(after_paths) do
       if type(p) == "string" and p ~= "" then
         local real = fs.real_path(p)
@@ -238,14 +237,11 @@ function M.new(opts)
     end
   end
 
-  -- A buffer-local `ft` stub deletes itself here: `self.disable` only tracks
-  -- global stubs, so an lhs-only key would otherwise recurse via feedkeys.
-  local function make_rhs(entry_name, key, load_entry, buf)
+  local function make_rhs(entry_name, key, load_entry)
     return function()
-      if buf then
-        pcall(vim.keymap.del, key.mode, key.lhs, { buffer = buf })
+      if not load_entry(entry_name, "key:" .. tostring(key.lhs)) then
+        return
       end
-      load_entry(entry_name, "key:" .. tostring(key.lhs))
       local feed = vim.api.nvim_replace_termcodes("<Ignore>" .. key.lhs, true, true, true)
       vim.api.nvim_feedkeys(feed, "i", false)
     end
@@ -301,14 +297,28 @@ function M.new(opts)
 
     if key.ft then
       local patterns = type(key.ft) == "table" and key.ft or { key.ft }
+      local t = triggers_for(entry_name)
+      local mapped = {}
+      local function set_for_buf(buf)
+        if mapped[buf] then
+          return
+        end
+        mapped[buf] = true
+        vim.keymap.set(key.mode, key.lhs, make_rhs(entry_name, key, load_entry), stub_opts(buf))
+        t.keys[#t.keys + 1] = { mode = key.mode, lhs = key.lhs, buf = buf }
+      end
+      for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+        if vim.api.nvim_buf_is_valid(buf) and vim.tbl_contains(patterns, vim.bo[buf].filetype) then
+          set_for_buf(buf)
+        end
+      end
       local id = vim.api.nvim_create_autocmd("FileType", {
         group = group,
         pattern = patterns,
         callback = function(args)
-          vim.keymap.set(key.mode, key.lhs, make_rhs(entry_name, key, load_entry, args.buf), stub_opts(args.buf))
+          set_for_buf(args.buf)
         end,
       })
-      local t = triggers_for(entry_name)
       t.autocmd_ids[#t.autocmd_ids + 1] = id
     else
       vim.keymap.set(key.mode, key.lhs, make_rhs(entry_name, key, load_entry), stub_opts(nil))
@@ -327,11 +337,15 @@ function M.new(opts)
 
     vim.api.nvim_create_user_command(cmd_name, function(ctx)
       -- `load_entry` deletes this stub before `config()` (re)defines the real command.
-      load_entry(entry_name, "cmd:" .. cmd_name)
+      if not load_entry(entry_name, "cmd:" .. cmd_name) then
+        return
+      end
 
       -- Forward range, bang, args, and `<mods>` to the now-real command.
       local ex = cmd_name
-      if ctx.range and ctx.range > 0 then
+      if ctx.range == 1 then
+        ex = string.format("%d%s", ctx.line2, ex)
+      elseif ctx.range == 2 then
         ex = string.format("%d,%d%s", ctx.line1, ctx.line2, ex)
       end
       if ctx.bang then
@@ -348,6 +362,7 @@ function M.new(opts)
       nargs = "*",
       bang = true,
       range = true,
+      addr = "other",
       desc = "Load plugin and execute " .. cmd_name,
     })
   end
@@ -356,7 +371,6 @@ function M.new(opts)
     local id = vim.api.nvim_create_autocmd(event_item.event, {
       group = group,
       pattern = event_item.pattern,
-      once = true,
       callback = function(ev)
         local before_groups = snapshot_event_groups(event_item.event)
         local loaded = load_entry(entry_name, "event:" .. event_item.event)
@@ -392,7 +406,6 @@ function M.new(opts)
     local id = vim.api.nvim_create_autocmd("FileType", {
       group = group,
       pattern = fts,
-      once = true,
       callback = function(args)
         local before_groups = snapshot_event_groups("FileType")
         local loaded = load_entry(entry.name, "ft")

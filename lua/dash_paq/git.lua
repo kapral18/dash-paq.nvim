@@ -5,6 +5,11 @@
 -- clears `GIT_DIR`/`GIT_WORK_TREE` the same way.
 local M = {}
 
+-- Match vim.pack's source identity: removing .git can conflate different repositories.
+function M.same_remote(a, b)
+  return type(a) == "string" and type(b) == "string" and a == b
+end
+
 local function clean_env()
   local env = vim.fn.environ()
   env.GIT_DIR = nil

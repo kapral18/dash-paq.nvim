@@ -57,7 +57,7 @@ function M.setup(ctx)
     local state = ctx.entry_state[name]
     if was_loaded then
       vim.notify(name .. " already loaded", vim.log.levels.INFO)
-    else
+    elseif state and state.status == "loaded" then
       vim.notify(string.format("%s loaded (%s)", name, state and state.loaded_by or "manual"), vim.log.levels.INFO)
     end
   end

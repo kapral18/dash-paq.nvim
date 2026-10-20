@@ -166,7 +166,7 @@ function M.attach(ctx)
   vim.keymap.set("n", "O", function()
     local row = rows.row_at_cursor(ctx)
     if not row or not row.repo_url then
-      vim.notify("No repo URL for this plugin", vim.log.levels.WARN)
+      vim.notify("No repository for this plugin", vim.log.levels.WARN)
       return
     end
     vim.ui.open(row.repo_url)

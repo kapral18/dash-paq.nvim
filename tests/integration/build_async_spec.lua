@@ -135,4 +135,38 @@ t.describe("shell-string build hooks at real startup", function()
   end)
 end)
 
+t.describe("WHEN a queued build loses its working directory", function()
+  t.it("SHOULD report the spawn error and continue with later builds", function()
+    local first = dirfixture.new("build_first", {})
+    local missing = dirfixture.new("build_missing", {})
+    local last = dirfixture.new("build_last", {})
+    local marker = last .. "/done"
+    require("dash_paq").setup({
+      dashboard = false,
+      version_policy = false,
+      spec = {
+        { name = "build_first", dir = first, build = "sleep 0.1" },
+        { name = "build_missing", dir = missing, build = "true" },
+        { name = "build_last", dir = last, build = "touch " .. vim.fn.shellescape(marker) },
+      },
+    })
+    vim.api.nvim_exec_autocmds(
+      "PackChanged",
+      { data = { kind = "update", spec = { name = "build_first" }, path = first } }
+    )
+    vim.api.nvim_exec_autocmds(
+      "PackChanged",
+      { data = { kind = "update", spec = { name = "build_missing" }, path = missing } }
+    )
+    vim.api.nvim_exec_autocmds(
+      "PackChanged",
+      { data = { kind = "update", spec = { name = "build_last" }, path = last } }
+    )
+    vim.fn.delete(missing, "d")
+    t.wait_until(function()
+      return vim.fn.filereadable(marker) == 1
+    end, 3000, "later build was stranded")
+  end)
+end)
+
 t.finish()

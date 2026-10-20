@@ -8,16 +8,16 @@ local dashboard_ns = vim.api.nvim_create_namespace("dash_paq.dashboard")
 
 function M.ensure_highlights()
   local set_hl = vim.api.nvim_set_hl
-  set_hl(0, "DashPaqTitle", { default = true, link = "Title" })
   set_hl(0, "DashPaqFiltered", { default = true, link = "WarningMsg" })
   set_hl(0, "DashPaqProgress", { default = true, link = "DiagnosticInfo" })
   set_hl(0, "DashPaqKey", { default = true, link = "Function" })
   set_hl(0, "DashPaqMeta", { default = true, link = "Comment" })
-  set_hl(0, "DashPaqLabel", { default = true, link = "Comment" })
-  set_hl(0, "DashPaqValue", { default = true, link = "Normal" })
-  set_hl(0, "DashPaqBar", { default = true, link = "NonText" })
+  set_hl(0, "DashPaqH1", { default = true, link = "IncSearch" })
+  set_hl(0, "DashPaqH2", { default = true, bold = true })
+  set_hl(0, "DashPaqButton", { default = true, link = "CursorLine" })
+  set_hl(0, "DashPaqButtonActive", { default = true, link = "Visual" })
   set_hl(0, "DashPaqRule", { default = true, link = "NonText" })
-  set_hl(0, "DashPaqHeader", { default = true, link = "Identifier" })
+  set_hl(0, "DashPaqHeader", { default = true, bold = true })
   set_hl(0, "DashPaqStatusUpdate", { default = true, link = "DiagnosticInfo" })
   set_hl(0, "DashPaqStatusSame", { default = true, link = "String" })
   set_hl(0, "DashPaqStatusError", { default = true, link = "DiagnosticError" })
@@ -28,50 +28,20 @@ function M.ensure_highlights()
   set_hl(0, "DashPaqStatusLocal", { default = true, link = "Comment" })
   set_hl(0, "DashPaqRiskBreak", { default = true, link = "DiagnosticWarn" })
   set_hl(0, "DashPaqRiskSafe", { default = true, link = "DiffAdd" })
-  set_hl(0, "DashPaqRiskUnknown", { default = true, link = "Comment" })
   set_hl(0, "DashPaqLink", { default = true, link = "Underlined" })
   set_hl(0, "DashPaqSelected", { default = true, link = "Special" })
 end
 
-local function progress_segments(ctx)
-  local progress = ctx.online_check_progress or {}
-  local total = progress.total or 0
-  local done = math.max(0, total - vim.tbl_count(ctx.refreshing or {}))
-  return {
-    {
-      key = progress.label or "Refreshing",
-      value = string.format("%d/%d", done, total),
-      key_hl = "DashPaqProgress",
-      value_hl = "DashPaqValue",
-    },
-  }
-end
-
-local function stats_segments(counts)
-  local segments = { { text = "All:", hl = "DashPaqMeta" } }
-  for _, status in ipairs({ "update", "same", "error", "unknown", "orphan", "drift", "risky", "local" }) do
-    segments[#segments + 1] = {
-      key = status,
-      value = tostring(counts[status]),
-      key_hl = "DashPaqLabel",
-      value_hl = M.status_hl[status],
-    }
-  end
-  segments[#segments + 1] = {
-    key = "breaking signals",
-    value = tostring(counts.breaking),
-    key_hl = "DashPaqLabel",
-    value_hl = "DashPaqRiskBreak",
-  }
-  return segments
-end
+-- Left margin before the header and every row, as lazy.nvim and mason.nvim
+-- leave; the window adds the same on the right.
+local PAD = "  "
 
 local function join_cells(cells)
-  local parts = {}
+  local parts = { PAD }
   local ranges = {}
-  local byte_col = 0
-  for _, cell in ipairs(cells) do
-    if #parts > 0 then
+  local byte_col = #PAD
+  for i, cell in ipairs(cells) do
+    if i > 1 then
       parts[#parts + 1] = " "
       byte_col = byte_col + 1
     end
@@ -87,7 +57,10 @@ end
 
 -- Column widths shared by the header and every data row so a single-row rewrite
 -- aligns with the full-table render.
-local NAME_COL, VERSION_COL, LINKS_COL = 34, 26, 12
+-- The status cell is two cells wide so a Nerd Font glyph drawn double-width
+-- (`ambiwidth=double`, `setcellwidths`) still fits.
+local STATUS_COL = 2
+local NAME_COL, VERSION_COL, NOTE_COL = 31, 27, 17
 
 -- The glyph shown in the status cell. While a row is mid-refresh
 -- (`ctx.refreshing[name]`), it shows the animated spinner frame instead of the
@@ -96,9 +69,9 @@ local function status_cell_text(ctx, row)
   if ctx.refreshing and ctx.refreshing[row.name] then
     local frames = ctx.spinner_frames or { "|", "/", "-", "\\" }
     local frame = frames[((ctx.spinner_frame or 0) % #frames) + 1]
-    return fmt.pad_cell(frame, 2)
+    return fmt.pad_cell(frame, STATUS_COL)
   end
-  return fmt.pad_cell(ctx.status_icon[row.status] or "?", 2)
+  return fmt.pad_cell(ctx.icons[row.status] or "?", STATUS_COL)
 end
 
 -- Build the buffer line + cell byte ranges for a single data row. Used by both
@@ -107,10 +80,13 @@ local function build_row_line(ctx, row)
   return join_cells({
     { key = "sel", text = fmt.pad_cell(ctx.selected[row.name] and "[x]" or "[ ]", 3) },
     { key = "status", text = status_cell_text(ctx, row) },
-    { key = "risk", text = fmt.pad_cell(fmt.risk_label(ctx, row), 2) },
     { text = fmt.pad_cell(row.name, NAME_COL) },
     { text = fmt.pad_cell(fmt.version_cell(row), VERSION_COL) },
-    { text = fmt.pad_cell(fmt.links_cell(ctx, row), LINKS_COL) },
+    -- A refreshing row's cached note may be stale until its result lands.
+    {
+      key = "note",
+      text = fmt.pad_cell((ctx.refreshing and ctx.refreshing[row.name]) and "" or fmt.note_cell(row), NOTE_COL),
+    },
   })
 end
 
@@ -127,7 +103,7 @@ local status_hl = {
 }
 M.status_hl = status_hl
 
--- Apply the selection/status/risk extmarks for a single data row at `line_no`
+-- Apply the selection/status/note extmarks for a single data row at `line_no`
 -- (1-based). Shared by the full-table and per-row render paths.
 local function apply_row_highlights(ctx, line_no, row, ranges)
   ranges = ranges or {}
@@ -145,197 +121,263 @@ local function apply_row_highlights(ctx, line_no, row, ranges)
       end_col = ranges.status.end_col,
     })
   end
-  if row.status == "update" and not (ctx.refreshing and ctx.refreshing[row.name]) then
-    local risk_group = row.breaking == true and "DashPaqRiskBreak"
-      or (row.breaking == false and "DashPaqRiskSafe" or "DashPaqRiskUnknown")
-    if ranges.risk then
-      pcall(vim.api.nvim_buf_set_extmark, ctx.bufnr, dashboard_ns, line_no - 1, ranges.risk.start_col, {
-        hl_group = risk_group,
-        end_col = ranges.risk.end_col,
-      })
-    end
+  if ranges.note then
+    pcall(vim.api.nvim_buf_set_extmark, ctx.bufnr, dashboard_ns, line_no - 1, ranges.note.start_col, {
+      hl_group = row.status == "update" and "DashPaqRiskBreak" or status_hl[row.status] or "DashPaqMeta",
+      end_col = ranges.note.end_col,
+    })
   end
 end
 
--- Render one segment to its display text and the relative byte spans coloring
--- its parts. A segment is one of:
---   { text = "...", hl = "Group" }                       -- a plain item
---   { key = "mode", value = "online",                    -- a key:value item
---     key_hl = "G1", value_hl = "G2", sep = ":" }         -- (sep defaults ":")
--- Returns `text, spans` where spans are `{start_col,end_col,hl}` (0-based, byte)
--- relative to the start of this segment's text.
-local function render_segment(seg)
-  if seg.key ~= nil then
-    local sep = seg.sep or ":"
-    local key = tostring(seg.key)
-    local value = tostring(seg.value)
-    local text = key .. sep .. value
-    local spans = {
-      { start_col = 0, end_col = #key, hl = seg.key_hl },
-    }
-    local value_start = #key + #sep
-    spans[#spans + 1] = { start_col = value_start, end_col = value_start + #value, hl = seg.value_hl }
-    return text, spans
-  end
-  local text = seg.text or ""
-  return text, { { start_col = 0, end_col = #text, hl = seg.hl } }
+local FILTER_LABELS = { all = "All", updates = "Updates", issues = "Issues", selected = "Selected" }
+
+-- "the Updates filter and search 'x'"; nil when nothing narrows the rows.
+-- With `max_width`, the search text is shortened inside its quotes to fit.
+local function has_search(ctx)
+  return type(ctx.search_text) == "string" and ctx.search_text ~= ""
 end
 
--- Lays out segments (see render_segment) into lines no wider than `width`,
--- joined by bar separators; wraps at a segment boundary so a `key:value` item
--- is never split mid-token. Oversized segments end with an ellipsis.
--- Returns lines and their highlight spans (0-based byte offsets).
-local function layout_segments(segments, width, bar_hl, use_nerd_font)
-  local bar = use_nerd_font and "│" or "|"
-  local joiner = " " .. bar .. " "
-  local out_lines = {}
-  local out_spans = {}
-
-  local cur_text = ""
-  local cur_spans = {}
-
-  local function flush()
-    out_lines[#out_lines + 1] = cur_text
-    out_spans[#out_spans + 1] = cur_spans
-    cur_text = ""
-    cur_spans = {}
-  end
-
-  local function add_spans_at(offset, spans)
-    for _, s in ipairs(spans) do
-      cur_spans[#cur_spans + 1] = { start_col = offset + s.start_col, end_col = offset + s.end_col, hl = s.hl }
-    end
-  end
-
-  for _, seg in ipairs(segments) do
-    local text, spans = render_segment(seg)
-    text = fmt.truncate_display(text, width)
-    if text ~= "" then
-      if cur_text == "" then
-        add_spans_at(0, spans)
-        cur_text = text
-      else
-        local candidate = cur_text .. joiner .. text
-        if vim.fn.strdisplaywidth(candidate) <= width then
-          local bar_start = #cur_text + 1 -- one byte for the leading space
-          cur_spans[#cur_spans + 1] = { start_col = bar_start, end_col = bar_start + #bar, hl = bar_hl }
-          add_spans_at(#cur_text + #joiner, spans)
-          cur_text = candidate
-        else
-          flush()
-          add_spans_at(0, spans)
-          cur_text = text
-        end
-      end
-    end
-  end
-  if cur_text ~= "" or #out_lines == 0 then
-    flush()
-  end
-
-  return { lines = out_lines, spans = out_spans }
-end
-
-local function active_filter_desc(ctx)
+local function active_filter_desc(ctx, max_width)
   local parts = {}
   if ctx.filter_mode ~= "all" then
-    parts[#parts + 1] = "filter:" .. ctx.filter_mode
+    parts[#parts + 1] = "the " .. (FILTER_LABELS[ctx.filter_mode] or ctx.filter_mode) .. " filter"
   end
-  if type(ctx.search_text) == "string" and ctx.search_text ~= "" then
-    parts[#parts + 1] = "search:'" .. ctx.search_text .. "'"
+  if has_search(ctx) then
+    local text = ctx.search_text
+    if max_width then
+      local fixed = table.concat(parts) .. (#parts > 0 and " and " or "") .. "search ''"
+      text = fmt.truncate_display(text, max_width - vim.fn.strdisplaywidth(fixed))
+    end
+    parts[#parts + 1] = "search '" .. text .. "'"
   end
   if #parts == 0 then
     return nil
   end
-  return table.concat(parts, ", ")
+  return table.concat(parts, " and ")
 end
 
-local function help_segments(ctx)
-  local function item(keys, action)
-    return { key = keys, value = action, sep = " ", key_hl = "DashPaqKey", value_hl = "DashPaqMeta" }
+local TABLE_WIDTH = 3 + STATUS_COL + NAME_COL + VERSION_COL + NOTE_COL + 4
+-- The dashboard window is sized to the table plus both margins.
+M.CONTENT_WIDTH = TABLE_WIDTH + 2 * #PAD
+
+-- One line from `{ text, hl }` chunks after the left margin, cut to the
+-- table's width. Returns the line and its byte spans.
+local function chunks_line(chunks)
+  local text, spans = PAD, {}
+  for _, chunk in ipairs(chunks) do
+    if chunk[2] then
+      spans[#spans + 1] = { start_col = #text, end_col = #text + #chunk[1], hl = chunk[2] }
+    end
+    text = text .. chunk[1]
   end
-  return {
-    item("r/R", "refresh offline/online"),
-    item("u/U", "update selected/visible"),
-    item("<Space>", "select"),
-    item("/", "search"),
-    item("f", "filter:" .. ctx.filter_mode),
-    item("s", "sort:" .. ctx.sort_mode),
-    item("K", "details"),
-    item("?", "keys"),
-    item("q", "close"),
-  }
+  if vim.fn.strdisplaywidth(text) > #PAD + TABLE_WIDTH then
+    text = fmt.truncate_display(text, #PAD + TABLE_WIDTH)
+    for _, span in ipairs(spans) do
+      span.end_col = math.min(span.end_col, #text)
+    end
+  end
+  return text, spans
 end
 
--- Header spans use byte offsets; widths use display cells, as do data rows.
-local function build_header_lines(ctx)
-  local visible_count = #rows.visible(ctx)
+local function progress_counts(ctx)
+  local progress = ctx.online_check_progress or {}
+  local total = progress.total or 0
+  return math.max(0, total - vim.tbl_count(ctx.refreshing or {})), total, progress.label or "Refreshing"
+end
+
+-- The title and the filters as pills, the active filter highlighted, with the
+-- help key flush right.
+local function tabs_line(ctx)
+  local chunks = { { " dash-paq ", "DashPaqH1" } }
+  for _, mode in ipairs(fmt.filter_modes) do
+    chunks[#chunks + 1] = { " " }
+    chunks[#chunks + 1] = {
+      " " .. (FILTER_LABELS[mode] or mode) .. " ",
+      mode == ctx.filter_mode and "DashPaqButtonActive" or "DashPaqButton",
+    }
+  end
+  chunks[#chunks + 1] = { " " }
+  chunks[#chunks + 1] = { "(f)", "DashPaqKey" }
+  local used = 0
+  for _, chunk in ipairs(chunks) do
+    used = used + vim.fn.strdisplaywidth(chunk[1])
+  end
+  local help = "press ? for help"
+  chunks[#chunks + 1] = { string.rep(" ", math.max(1, TABLE_WIDTH - used - #help)) .. "press ", "DashPaqMeta" }
+  chunks[#chunks + 1] = { "?", "DashPaqKey" }
+  chunks[#chunks + 1] = { " for help", "DashPaqMeta" }
+  return chunks_line(chunks)
+end
+
+-- The rule glyph and how many of it span the table; `─` is ambiguous-width,
+-- so it draws two cells with `ambiwidth=double`.
+local function rule_glyph(ctx)
+  local glyph = ctx.use_nerd_font and "─" or "-"
+  return glyph, math.floor(TABLE_WIDTH / math.max(1, vim.fn.strdisplaywidth(glyph)))
+end
+
+-- A bar across the table while an operation runs; blank otherwise, so the
+-- header keeps its height.
+local function progress_line(ctx)
+  if not ctx.online_check_running then
+    return "", {}
+  end
+  local done, total = progress_counts(ctx)
+  local todo, span = rule_glyph(ctx)
+  local filled = total > 0 and math.floor(done / total * span + 0.5) or 0
+  -- ASCII fills with `=` so progress reads without color.
+  return chunks_line({
+    { (ctx.use_nerd_font and todo or "="):rep(filled), "DashPaqProgress" },
+    { todo:rep(span - filled), "DashPaqRule" },
+  })
+end
+
+-- Attention first; `breaking` qualifies the update count right before it.
+local SUMMARY_ORDER = { "update", "breaking", "error", "drift", "risky", "orphan", "unknown", "same", "local" }
+
+-- Plugin total (or task progress) and each non-zero status count with the
+-- glyph the rows use. Counts cover all plugins, filtered or not.
+local function summary_line(ctx)
+  local chunks
+  if ctx.online_check_running then
+    local done, total, label = progress_counts(ctx)
+    chunks = { { label .. ": ", "DashPaqH2" }, { string.format("%d/%d", done, total), "DashPaqMeta" } }
+  elseif active_filter_desc(ctx) then
+    chunks = {
+      { "Showing: ", "DashPaqH2" },
+      { string.format("%d of %d plugins", #rows.visible(ctx), #ctx.rows), "DashPaqFiltered" },
+    }
+  else
+    chunks = {
+      { "Total: ", "DashPaqH2" },
+      { string.format("%d %s", #ctx.rows, #ctx.rows == 1 and "plugin" or "plugins"), "DashPaqMeta" },
+    }
+  end
+  local counts = rows.summary_counts(ctx)
+  local present = {}
+  for _, status in ipairs(SUMMARY_ORDER) do
+    if counts[status] > 0 then
+      present[#present + 1] = status
+    end
+  end
+  -- Icon and count for each status, then words left to right until one does
+  -- not fit, so a later count never keeps words an earlier one lost; a count
+  -- left without words is named in the help popup. Counts that do not fit
+  -- with wide gaps get narrower ones.
+  local function word(status)
+    local label = fmt.status_labels[status]
+    return " " .. (counts[status] == 1 and label[1] or label[2])
+  end
+  local function icon_of(status)
+    return status == "breaking" and ctx.icons.risk_break or ctx.icons[status]
+  end
+  local function counts_width(gap)
+    local width = 0
+    for _, status in ipairs(present) do
+      width = width + vim.fn.strdisplaywidth(gap .. icon_of(status) .. " " .. counts[status])
+    end
+    return width
+  end
+  local budget = TABLE_WIDTH
+  for _, chunk in ipairs(chunks) do
+    budget = budget - vim.fn.strdisplaywidth(chunk[1])
+  end
+  local gap = counts_width("   ") <= budget and "   " or "  "
+  budget = budget - counts_width(gap)
+  local worded = {}
+  for _, status in ipairs(present) do
+    local cost = vim.fn.strdisplaywidth(word(status))
+    if cost > budget then
+      break
+    end
+    worded[status] = true
+    budget = budget - cost
+  end
+  for _, status in ipairs(present) do
+    local breaking = status == "breaking"
+    chunks[#chunks + 1] = { gap }
+    chunks[#chunks + 1] = { icon_of(status), breaking and "DashPaqRiskBreak" or status_hl[status] }
+    chunks[#chunks + 1] = { " " .. counts[status] .. (worded[status] and word(status) or ""), "DashPaqMeta" }
+  end
+  return chunks_line(chunks)
+end
+
+-- Check time, sort, search, and selection, dimmed. A long search
+-- is shortened so the line fits the table's width.
+local function meta_line(ctx)
+  local cache = state.pack_report_cache
+  local parts = {}
+  if cache.mode and cache.updated_at then
+    parts[#parts + 1] = { { "checked " .. cache.mode .. " " .. state.format_cache_stamp(cache.updated_at) } }
+  else
+    parts[#parts + 1] = { { "not checked yet" } }
+  end
+  parts[#parts + 1] = { { "sorted by " .. ctx.sort_mode } }
+  local search_part
+  if has_search(ctx) then
+    search_part = { { "search " }, { "", "DashPaqFiltered" } }
+    parts[#parts + 1] = search_part
+  end
   local selected = rows.selected_count(ctx, false)
-  local hidden_selected = selected - rows.selected_count(ctx, true)
-  local win_width = (ctx.winid and vim.api.nvim_win_is_valid(ctx.winid)) and vim.api.nvim_win_get_width(ctx.winid)
-    or vim.o.columns
-  local width = math.max(1, win_width)
+  if selected > 0 then
+    local hidden = selected - rows.selected_count(ctx, true)
+    parts[#parts + 1] =
+      { { string.format("%d selected", selected) .. (hidden > 0 and string.format(" (%d hidden)", hidden) or "") } }
+  end
+
+  local sep = " · "
+  if search_part then
+    local used = vim.fn.strdisplaywidth(sep) * (#parts - 1) + vim.fn.strdisplaywidth("''")
+    for _, part in ipairs(parts) do
+      for _, chunk in ipairs(part) do
+        used = used + vim.fn.strdisplaywidth(chunk[1])
+      end
+    end
+    search_part[2][1] = "'" .. fmt.truncate_display(ctx.search_text, math.max(1, TABLE_WIDTH - used)) .. "'"
+  end
+
+  local chunks = {}
+  for i, part in ipairs(parts) do
+    if i > 1 then
+      chunks[#chunks + 1] = { sep, "DashPaqMeta" }
+    end
+    for _, chunk in ipairs(part) do
+      chunks[#chunks + 1] = { chunk[1], chunk[2] or "DashPaqMeta" }
+    end
+  end
+  return chunks_line(chunks)
+end
+
+-- Fixed height, laid out like lazy.nvim and mason.nvim: a blank line, title and
+-- filter pills, a progress bar (blank when idle), the summary, the dimmed
+-- meta line, a blank line, then the column titles and their rule. Spans use
+-- byte offsets; widths use display cells, as do data rows.
+local function build_header_lines(ctx)
   local lines, line_spans = {}, {}
 
-  local function push_raw(text, hl)
+  local function push(text, spans)
     lines[#lines + 1] = text
-    line_spans[#lines] = { { start_col = 0, end_col = #text, hl = hl } }
+    line_spans[#lines] = spans
   end
 
-  local function push_section(segments)
-    if #segments == 0 then
-      return
-    end
-    local laid = layout_segments(segments, width, "DashPaqBar", ctx.use_nerd_font)
-    vim.list_extend(lines, laid.lines)
-    vim.list_extend(line_spans, laid.spans)
-  end
-
-  push_section({
-    { text = string.format("%d of %d plugins", visible_count, #ctx.rows), hl = "DashPaqTitle" },
-    {
-      key = "selected",
-      value = tostring(selected) .. (hidden_selected > 0 and string.format(" (%d hidden)", hidden_selected) or ""),
-      key_hl = "DashPaqLabel",
-      value_hl = "DashPaqValue",
-    },
-    {
-      key = "checked " .. (state.pack_report_cache.mode or "unknown"),
-      value = state.format_cache_stamp(state.pack_report_cache.updated_at),
-      key_hl = "DashPaqLabel",
-      value_hl = "DashPaqValue",
-    },
+  push("", {})
+  push(tabs_line(ctx))
+  push(progress_line(ctx))
+  push(summary_line(ctx))
+  push(meta_line(ctx))
+  push("", {})
+  -- Plain-word column titles; the checkbox and icon columns need none.
+  local columns = join_cells({
+    { text = fmt.pad_cell("", 3) },
+    { text = fmt.pad_cell("", STATUS_COL) },
+    { text = fmt.pad_cell("Plugin", NAME_COL) },
+    { text = fmt.pad_cell("Version", VERSION_COL) },
+    { text = fmt.pad_cell("Note", NOTE_COL) },
   })
-
-  local filter = active_filter_desc(ctx)
-  if filter then
-    push_section({
-      { text = filter, hl = "DashPaqFiltered" },
-      { text = "f changes filter; c clears search", hl = "DashPaqMeta" },
-    })
-  end
-  -- Counts cover all plugins; the first line names the visible subset.
-  push_section(stats_segments(rows.summary_counts(ctx)))
-  if ctx.online_check_running then
-    push_section(progress_segments(ctx))
-  end
-  push_section(help_segments(ctx))
-
-  -- The table keeps fixed columns and can scroll horizontally.
-  local rule = string.rep(ctx.use_nerd_font and "─" or "-", width)
-  push_raw(rule, "DashPaqRule")
-  push_raw(
-    table.concat({
-      fmt.pad_cell("SEL", 3),
-      fmt.pad_cell("ST", 2),
-      fmt.pad_cell("RK", 2),
-      fmt.pad_cell("PLUGIN", NAME_COL),
-      fmt.pad_cell("VERSION", VERSION_COL),
-      fmt.pad_cell("LINKS", LINKS_COL),
-    }, " "),
-    "DashPaqHeader"
-  )
-  push_raw(rule, "DashPaqRule")
+  push(columns, { { start_col = #PAD, end_col = #columns, hl = "DashPaqHeader" } })
+  local glyph, span = rule_glyph(ctx)
+  local rule = PAD .. glyph:rep(span)
+  push(rule, { { start_col = #PAD, end_col = #rule, hl = "DashPaqRule" } })
   return lines, line_spans
 end
 
@@ -360,22 +402,28 @@ local function build_lines(ctx)
     -- Distinguish "nothing installed" from "everything filtered out": when a
     -- filter is active, say so and point at the keys that reset it.
     if #(ctx.rows or {}) == 0 then
-      lines[#lines + 1] = "(No plugins installed)"
+      lines[#lines + 1] = PAD .. "(No plugins installed)"
     else
-      lines[#lines + 1] = string.format(
-        "(0 of %d shown — %s hides the rest; press c to clear search, f to cycle filter)",
-        #(ctx.rows or {}),
-        active_filter_desc(ctx) or "filter"
-      )
+      -- Two lines, so both fit the window at the table's width.
+      local prefix = string.format("(0 of %d shown: ", #(ctx.rows or {}))
+      local suffix = (has_search(ctx) and ctx.filter_mode ~= "all" and " hide" or " hides") .. " the rest)"
+      local desc = active_filter_desc(ctx, TABLE_WIDTH - vim.fn.strdisplaywidth(prefix .. suffix)) or "the filter"
+      lines[#lines + 1] = PAD .. prefix .. desc .. suffix
+      local hints = {}
+      if has_search(ctx) then
+        hints[#hints + 1] = "c clears the search"
+      end
+      if ctx.filter_mode ~= "all" then
+        hints[#hints + 1] = "f cycles the filter"
+      end
+      lines[#lines + 1] = PAD .. table.concat(hints, ", ")
     end
   end
   return lines
 end
 
--- Highlight the header region by applying the per-line byte spans produced with
--- the header lines. Line-count-agnostic so it stays correct as sections wrap to
--- a variable number of lines, and segment-level so each key/value/bar carries
--- its own color. Spans are clamped to the line length defensively.
+-- Highlight the header region by applying the per-line byte spans built with
+-- the header lines. Spans are clamped to the line length defensively.
 local function highlight_static_headers(bufnr, lines, line_spans)
   if type(line_spans) ~= "table" then
     return
@@ -442,10 +490,9 @@ function M.render_row(ctx, name)
 end
 
 -- Rewrite only the header lines, to refresh the live progress counter during
--- an incremental refresh without redrawing data rows. The header is
--- variable-height (wrapped help + optional FILTERED banner): if the rebuilt
--- header's line count differs from the buffer's current header, fall back to
--- a full render so data rows aren't clipped or duplicated.
+-- an incremental refresh without redrawing data rows. The header has a fixed
+-- height; if a rebuilt header's line count ever differs from the buffer's,
+-- fall back to a full render so data rows aren't clipped or duplicated.
 function M.render_header(ctx)
   if not (ctx.bufnr and vim.api.nvim_buf_is_valid(ctx.bufnr)) then
     return

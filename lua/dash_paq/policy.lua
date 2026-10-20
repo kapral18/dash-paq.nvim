@@ -8,7 +8,7 @@ local fs = require("dash_paq.fs")
 local parse_release_tag = semver.parse_release_tag
 
 -- `version_policy.json` layout version; a cache with any other value is rebuilt.
-local SCHEMA = 3
+M.SCHEMA = 4
 
 M.DEFAULTS = {
   min_tags = 3,
@@ -289,16 +289,13 @@ function M.write_version_policy(plugins)
   if type(plugins) ~= "table" then
     return false
   end
-  return fs.write_json(M.version_policy_path(), { schema = SCHEMA, generated_at = os.time(), plugins = plugins })
+  return fs.write_json(M.version_policy_path(), { schema = M.SCHEMA, generated_at = os.time(), plugins = plugins })
 end
 
 -- Returns "fresh" (cache still valid), "full" (expired or schema mismatch,
 -- recompute everything), or "incremental" (valid but missing some plugins).
-local function policy_refresh_mode(existing, plugin_names)
-  if type(plugin_names) ~= "table" then
-    return "full"
-  end
-  if type(existing) ~= "table" or existing.schema ~= SCHEMA or type(existing.plugins) ~= "table" then
+local function policy_refresh_mode(existing, installed)
+  if type(existing) ~= "table" or existing.schema ~= M.SCHEMA or type(existing.plugins) ~= "table" then
     return "full"
   end
 
@@ -308,8 +305,9 @@ local function policy_refresh_mode(existing, plugin_names)
     return "full"
   end
 
-  for _, name in ipairs(plugin_names) do
-    if existing.plugins[name] == nil then
+  for _, item in ipairs(installed) do
+    local cached = existing.plugins[item.name]
+    if type(cached) ~= "table" or not git.same_remote(cached.src, item.src) then
       return "incremental"
     end
   end
@@ -320,6 +318,12 @@ end
 -- True while `refresh_version_policy_async` is running. Stops the startup
 -- refresh and a dashboard-triggered refresh from running concurrently.
 local policy_refresh_in_progress = false
+local refresh_generation = 0
+
+local function supersede_refresh()
+  refresh_generation = refresh_generation + 1
+  policy_refresh_in_progress = false
+end
 
 -- Gap between processing one plugin and the next in `refresh_version_policy_async`'s
 -- step chain. Chaining with bare `vim.schedule` would starve input: Neovim
@@ -343,15 +347,11 @@ local function plan_refresh()
   for _, p in ipairs(plug_data) do
     local name = p and p.spec and p.spec.name
     if type(name) == "string" and name ~= "" then
-      installed[#installed + 1] = { name = name, path = p.path }
+      installed[#installed + 1] = { name = name, path = p.path, src = p.spec.src }
     end
   end
-  local names = vim.tbl_map(function(item)
-    return item.name
-  end, installed)
-
   local existing = M.load_version_policy()
-  local mode = policy_refresh_mode(existing, names)
+  local mode = policy_refresh_mode(existing, installed)
   local existing_plugins = existing and existing.plugins or {}
   if mode == "fresh" then
     return { mode = mode, plugins = existing_plugins, pending = {} }
@@ -359,13 +359,10 @@ local function plan_refresh()
 
   local plugins = {}
   if mode == "incremental" then
-    local name_set = {}
-    for _, name in ipairs(names) do
-      name_set[name] = true
-    end
-    for name, info in pairs(existing_plugins) do
-      if name_set[name] then
-        plugins[name] = info
+    for _, item in ipairs(installed) do
+      local info = existing_plugins[item.name]
+      if type(info) == "table" and git.same_remote(info.src, item.src) then
+        plugins[item.name] = info
       end
     end
   end
@@ -382,6 +379,7 @@ end
 -- Synchronous refresh for user-initiated paths (`:DashPaq sync`, `status`, `policy-rebuild`)
 -- where the user is already waiting.
 function M.refresh_version_policy_if_needed()
+  supersede_refresh()
   local plan = plan_refresh()
   if not plan then
     return false
@@ -391,6 +389,7 @@ function M.refresh_version_policy_if_needed()
   end
   for _, item in ipairs(plan.pending) do
     plan.plugins[item.name] = decide_tag_strategy(item.path)
+    plan.plugins[item.name].src = item.src
   end
   return M.write_version_policy(plan.plugins)
 end
@@ -431,10 +430,12 @@ function M.refresh_version_policy_async(callback)
   end
 
   policy_refresh_in_progress = true
+  local generation = refresh_generation
   local index = 0
 
   local function step()
-    if not policy_refresh_in_progress then
+    if generation ~= refresh_generation then
+      reply(false, "superseded")
       return
     end
     index = index + 1
@@ -450,6 +451,7 @@ function M.refresh_version_policy_async(callback)
     local item = pending[index]
     local ok_item, decision = pcall(decide_tag_strategy, item.path)
     if ok_item and type(decision) == "table" then
+      decision.src = item.src
       plugins[item.name] = decision
     end
     vim.defer_fn(step, ASYNC_STEP_YIELD_MS)
@@ -462,6 +464,7 @@ end
 -- Drop a single plugin entry (or everything when `name == nil`) from the
 -- on-disk version policy so the next refresh recomputes it from scratch.
 function M.invalidate_version_policy(name)
+  supersede_refresh()
   local existing = M.load_version_policy()
   if type(existing) ~= "table" or type(existing.plugins) ~= "table" then
     return true
