@@ -6,48 +6,81 @@ local M = {}
 local semver_major = semver.semver_major
 local parse_release_tag = semver.parse_release_tag
 
--- Shared by synchronous reads and prefetch; tag caches are reset after fetch/update.
-local revision_tag_cache = {}
-local revision_tags_cache = {}
-local repo_tags_cache = {}
+-- Tag caches hold one table per repo; a fetch drops its repo's table, an update
+-- drops all. A query still waiting on Git writes into the dropped table, never
+-- the live cache.
+local revision_tag_cache = {} -- [path][rev] = tag or false
+local revision_tags_cache = {} -- [path][rev] = tags
+local repo_tags_cache = {} -- [path] = { all = tags }
 local commit_range_cache = {}
 
-function M.invalidate_tags()
-  revision_tag_cache = {}
-  revision_tags_cache = {}
-  repo_tags_cache = {}
+local function repo_cache(cache, path)
+  local repo = cache[path]
+  if not repo then
+    repo = {}
+    cache[path] = repo
+  end
+  return repo
 end
 
-local function git_tags(path, args, cache, key)
-  if type(path) ~= "string" or path == "" then
-    return {}
+-- `path` limits the reset to one repo, so one plugin's fetch keeps the tags
+-- other plugins already prefetched; nil resets every repo.
+function M.invalidate_tags(path)
+  if path == nil then
+    revision_tag_cache = {}
+    revision_tags_cache = {}
+    repo_tags_cache = {}
+    return
   end
-  if cache[key] ~= nil then
-    return cache[key]
+  revision_tag_cache[path] = nil
+  revision_tags_cache[path] = nil
+  repo_tags_cache[path] = nil
+end
+
+-- Calls `done(tags)` from the main loop; never waits on Git.
+local function git_tags(path, args, cache, key, done)
+  if type(path) ~= "string" or path == "" then
+    vim.schedule(function()
+      done({})
+    end)
+    return
+  end
+  local repo = repo_cache(cache, path)
+  if repo[key] ~= nil then
+    local tags = repo[key]
+    vim.schedule(function()
+      done(tags)
+    end)
+    return
   end
 
   local command = { "-C", path, "tag" }
   vim.list_extend(command, args)
-  local result = git.run(command, { text = true }):wait()
-  if result.code ~= 0 or type(result.stdout) ~= "string" then
-    cache[key] = {}
-    return cache[key]
-  end
-
-  cache[key] = vim.split(result.stdout, "\n", { trimempty = true })
-  return cache[key]
+  git.run_async(command, function(result)
+    local tags = {}
+    if result.code == 0 and type(result.stdout) == "string" then
+      tags = vim.split(result.stdout, "\n", { trimempty = true })
+    end
+    -- A spawn failure answers empty without caching, so a later query retries.
+    if not result.spawn_error then
+      repo[key] = tags
+    end
+    done(tags)
+  end)
 end
 
-local function tags_on_revision(path, rev)
+local function tags_on_revision(path, rev, done)
   if type(rev) ~= "string" or rev == "" then
-    return {}
+    vim.schedule(function()
+      done({})
+    end)
+    return
   end
-  local key = path .. "@" .. rev
-  return git_tags(path, { "--sort=-v:refname", "--points-at", rev }, revision_tags_cache, key)
+  git_tags(path, { "--sort=-v:refname", "--points-at", rev }, revision_tags_cache, rev, done)
 end
 
-local function all_tags(path)
-  return git_tags(path, { "--list", "--sort=-v:refname" }, repo_tags_cache, path)
+local function all_tags(path, done)
+  git_tags(path, { "--list", "--sort=-v:refname" }, repo_tags_cache, "all", done)
 end
 
 -- Tie-break by actual semver comparison, not string order (lexically "1.9.0"
@@ -140,15 +173,14 @@ local function tag_on_revision(path, rev)
   if type(path) ~= "string" or path == "" or type(rev) ~= "string" or rev == "" then
     return nil
   end
-  local key = path .. "@" .. rev
-  local cache = revision_tag_cache
-  if cache[key] ~= nil then
-    return cache[key] or nil
+  local cache = repo_cache(revision_tag_cache, path)
+  if cache[rev] ~= nil then
+    return cache[rev] or nil
   end
 
   local result = git.run(tag_on_revision_cmd(path, rev), { text = true }):wait()
-  cache[key] = parse_tag_on_revision(result)
-  return cache[key] or nil
+  cache[rev] = parse_tag_on_revision(result)
+  return cache[rev] or nil
 end
 
 local function commit_range(path, rev_before, rev_after)
@@ -198,10 +230,20 @@ function M.prefetch_range(path, rev_before, rev_after, done)
 
   if type(path) == "string" and path ~= "" then
     if type(rev_before) == "string" and rev_before ~= "" then
-      queue(tag_on_revision_cmd(path, rev_before), revision_tag_cache, path .. "@" .. rev_before, parse_tag_on_revision)
+      queue(
+        tag_on_revision_cmd(path, rev_before),
+        repo_cache(revision_tag_cache, path),
+        rev_before,
+        parse_tag_on_revision
+      )
     end
     if type(rev_after) == "string" and rev_after ~= "" and rev_after ~= rev_before then
-      queue(tag_on_revision_cmd(path, rev_after), revision_tag_cache, path .. "@" .. rev_after, parse_tag_on_revision)
+      queue(
+        tag_on_revision_cmd(path, rev_after),
+        repo_cache(revision_tag_cache, path),
+        rev_after,
+        parse_tag_on_revision
+      )
     end
 
     local key = range_key(path, rev_before, rev_after)

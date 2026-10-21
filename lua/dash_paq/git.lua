@@ -29,4 +29,17 @@ function M.run(args, opts, on_exit)
   return vim.system(cmd, opts, on_exit)
 end
 
+-- `M.run` that calls `done(result)` from the main loop. A spawn failure
+-- answers `{ code = -1, stdout = "", spawn_error = <message> }`.
+---@param args string[]
+---@param done fun(out: vim.SystemCompleted|{ code: integer, stdout: string, spawn_error: string })
+function M.run_async(args, done)
+  local ok, err = pcall(M.run, args, { text = true }, vim.schedule_wrap(done))
+  if not ok then
+    vim.schedule(function()
+      done({ code = -1, stdout = "", spawn_error = tostring(err) })
+    end)
+  end
+end
+
 return M

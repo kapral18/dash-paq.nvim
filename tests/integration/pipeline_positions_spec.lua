@@ -62,4 +62,29 @@ t.describe("WHEN a queued refresh target has been deleted", function()
   end)
 end)
 
+t.describe("WHEN git cannot be spawned for a refresh target", function()
+  t.it("SHOULD report the spawn error and finish the pipeline", function()
+    local git = require("dash_paq.git")
+    local original = git.run
+    git.run = function()
+      error("ENOENT: no such file or directory")
+    end
+    local results, finished = {}, false
+    local ok, err = pcall(function()
+      report.run_refresh_pipeline({ "pa" }, true, function(result)
+        results[result.name] = result
+      end, function()
+        finished = true
+      end)
+      t.wait_until(function()
+        return finished
+      end, 3000, "refresh was stranded")
+    end)
+    git.run = original
+    t.assert.truthy(ok, err)
+    t.assert.equals("error", results.pa.status)
+    t.assert.match("ENOENT", results.pa.error)
+  end)
+end)
+
 t.finish()

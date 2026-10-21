@@ -308,9 +308,6 @@ Open the same update confirmation using local refs without fetching
 (`vim.pack.update(nil, { offline = true })`). Confirming updates still
 changes checkouts and the lockfile.
 
-:DashPaq stats                                                *:DashPaq-stats*
-Print last raw update/same/error counters, check timestamps.
-
 :DashPaq trace [plugin]                                       *:DashPaq-trace*
 Shows every enabled entry's load status, load reason, time loaded, and
 trigger set in a buffer; filters to one plugin by name. `q`/`<Esc>`
@@ -319,25 +316,6 @@ closes it.
 :DashPaq load {plugin}                                         *:DashPaq-load*
 Force-load one deferred entry: dependencies, `config`/auto-`setup()`
 (`init` ran at setup time), after/plugin files, as if triggered.
-
-:DashPaq lock info                                             *:DashPaq-lock*
-Show the lockfile path, plugin count, mtime.
-
-:DashPaq lock export {path}
-Copy the live lockfile to `{path}`. `{path}` may contain spaces.
-
-:DashPaq lock import {path}
-Overwrite the live lockfile from `{path}` after validating plugin names,
-sources, revisions, and serialized versions. Restart afterwards:
-`vim.pack` keeps the lockfile it read at
-startup in memory, so any update or delete applied before the restart
-(for example a confirmed |:DashPaq-sync| or |:DashPaq-status|, or the
-dashboard's `u`/`U`/`<CR>`/`V`/`C`) writes that copy back over the
-import. After the restart, plugins missing on disk install at
-the lockfile's revisions, and
-`vim.pack.update(nil, { target = 'lockfile' })` moves installed ones to
-them. |:DashPaq-sync| instead updates each plugin to its spec's
-`version`.
 
 :DashPaq toggle-dev {plugin}                             *:DashPaq-toggle-dev*
 Flip a dev-capable plugin between its upstream `vim.pack` clone and its dev
@@ -396,9 +374,9 @@ the fetched targets, then check out each fetched
 plugin with `vim.pack.update`, which blocks input while it runs. While
 the cursor keeps changing lines, queued checkouts wait until it has
 stayed on one line for 300 ms. The progress counter counts completed rows,
-including checkouts. Applied counts include only confirmed successful
-checkouts. Operations continue after closing the window; a new operation
-waits for the previous one to finish.
+including checkouts. With |dash-paq-version-policy| enabled, only confirmed
+successful checkouts start its refresh. Operations continue after closing
+the window; a new operation waits for the previous one to finish.
 
 Filter/search/sort state persists across sessions (see
 |dash-paq-state|); a saved `selected` filter reopens as `all`.
@@ -446,7 +424,6 @@ only reverts commits, or `possibly breaking`; other rows that need attention say
 `not checked`. `?`
 lists what each icon means. Breaking signals come from versions and
 commit messages, not compatibility tests.
-Use |:DashPaq-stats| for the last check counts and check/apply times.
 
 ==============================================================================
 9. Version policy                                    *dash-paq-version-policy*
@@ -578,15 +555,15 @@ Under `stdpath("state") .. "/dash-paq/"`:
   `version_policy.json`   per-plugin source, strategy, latest tag, reasoning
                           (schema 4; see |dash-paq-version-policy|).
   `dashboard_state.json`  last update report (per-plugin status, pending
-                          commits, diff URLs), timestamps/counters,
+                          commits, diff URLs), last check time and mode,
                           filter/sort/search state.
   `dev.json`              saved per-plugin dev choices (name -> "upstream"
                           or a checkout path); see |dash-paq-dev|.
 
-`vim.pack`'s own lockfile is not written by dash-paq.nvim except
-through |:DashPaq-lock|; dashboard updates and cleans still change it
-through `vim.pack`. It lives at
-`stdpath("config") .. "/nvim-pack-lock.json"`.
+dash-paq.nvim never writes `vim.pack`'s own lockfile; dashboard updates and
+cleans change it through `vim.pack`. It lives at
+`stdpath("config") .. "/nvim-pack-lock.json"`; to back it up or restore
+it, see |vim.pack-lockfile|.
 
 ==============================================================================
 13. Highlight groups                                     *dash-paq-highlights*

@@ -29,13 +29,13 @@ commands.register("trace", {
     return commands.filter({ "beta", "alpha" }, arglead)
   end,
 })
-commands.register("lock", {
-  usage = "lock info|export <path>|import <path>",
+commands.register("pair", {
+  usage = "pair <first> <second>",
   impl = function(args, opts)
-    calls[#calls + 1] = { name = "lock", args = args, opts = opts }
+    calls[#calls + 1] = { name = "pair", args = args, opts = opts }
   end,
   complete = function(arglead, done)
-    calls[#calls + 1] = { name = "lock-complete", arglead = arglead, done = done }
+    calls[#calls + 1] = { name = "pair-complete", arglead = arglead, done = done }
     return {}
   end,
 })
@@ -67,14 +67,6 @@ t.describe("running :DashPaq", function()
     vim.cmd("DashPaq trace alpha")
     t.assert.equals("trace", calls[1].name)
     t.assert.same({ "alpha" }, calls[1].args)
-    t.assert.equals("alpha", calls[1].opts.raw)
-  end)
-
-  t.it("keeps spaces in the raw remainder", function()
-    reset()
-    vim.cmd("DashPaq lock export /tmp/a b.json")
-    t.assert.same({ "export", "/tmp/a", "b.json" }, calls[1].args)
-    t.assert.equals("export /tmp/a b.json", calls[1].opts.raw)
   end)
 
   t.it("rejects '!' on a subcommand that does not accept it", function()
@@ -99,7 +91,7 @@ end)
 
 t.describe("completing :DashPaq", function()
   t.it("lists subcommands", function()
-    t.assert.same({ "lock", "sync", "trace" }, vim.fn.getcompletion("DashPaq ", "cmdline"))
+    t.assert.same({ "pair", "sync", "trace" }, vim.fn.getcompletion("DashPaq ", "cmdline"))
   end)
 
   t.it("filters subcommands by the typed prefix", function()
@@ -126,12 +118,12 @@ t.describe("completing :DashPaq", function()
 
   t.it("passes earlier arguments as done", function()
     reset()
-    commands.complete("", "DashPaq lock export ")
-    t.assert.same({ "export" }, calls[1].done)
+    commands.complete("", "DashPaq pair one ")
+    t.assert.same({ "one" }, calls[1].done)
     reset()
-    commands.complete("/tm", "DashPaq lock export /tm")
-    t.assert.same({ "export" }, calls[1].done)
-    t.assert.equals("/tm", calls[1].arglead)
+    commands.complete("tw", "DashPaq pair one tw")
+    t.assert.same({ "one" }, calls[1].done)
+    t.assert.equals("tw", calls[1].arglead)
   end)
 
   t.it("returns nothing for an unknown subcommand", function()
@@ -146,14 +138,14 @@ t.describe("WHEN completion runs before existing arguments", function()
 
   t.it("SHOULD pass only arguments before the cursor", function()
     reset()
-    commands.complete("/tm", "DashPaq lock export /tm ignored", 23)
-    t.assert.same({ "export" }, calls[1].done)
+    commands.complete("tw", "DashPaq pair one tw ignored", 19)
+    t.assert.same({ "one" }, calls[1].done)
   end)
 end)
 
 t.describe("WHEN :DashPaq is abbreviated, prefixed, or filtered by a non-prefix", function()
   t.it("SHOULD complete an abbreviated command name", function()
-    t.assert.same({ "lock", "sync", "trace" }, commands.complete("", "DashP "))
+    t.assert.same({ "pair", "sync", "trace" }, commands.complete("", "DashP "))
   end)
 
   t.it("SHOULD complete after a command modifier", function()

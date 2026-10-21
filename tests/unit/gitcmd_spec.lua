@@ -17,6 +17,18 @@ local function count_git_calls(fn)
   return count
 end
 
+-- Tag listings answer through a callback; wait for it.
+local function await(start)
+  local value, done = nil, false
+  start(function(result)
+    value, done = result, true
+  end)
+  t.wait_until(function()
+    return done
+  end, 5000, "tag listing never answered")
+  return value
+end
+
 t.describe("two release tags point at the same revision (tag tie-break)", function()
   local remote = gitfixture.new_remote("tietest")
   gitfixture.commit(remote, "feat: initial", { ["a.txt"] = "1" })
@@ -52,11 +64,21 @@ t.describe("listing tags on a revision", function()
   local head = vim.trim(vim.system({ "git", "-C", remote.work, "rev-parse", "HEAD" }, { text = true }):wait().stdout)
 
   t.it("returns the tags pointing at that revision", function()
-    t.assert.same({ "v1.0.0" }, gitcmd.tags_on_revision(remote.work, head))
+    t.assert.same(
+      { "v1.0.0" },
+      await(function(done)
+        gitcmd.tags_on_revision(remote.work, head, done)
+      end)
+    )
   end)
 
   t.it("returns an empty list for an unknown path", function()
-    t.assert.same({}, gitcmd.tags_on_revision("", head))
+    t.assert.same(
+      {},
+      await(function(done)
+        gitcmd.tags_on_revision("", head, done)
+      end)
+    )
   end)
 end)
 
@@ -68,7 +90,12 @@ t.describe("listing all tags in a repo", function()
   gitfixture.tag(remote, "v2.0.0")
 
   t.it("lists every tag in the repo, sorted newest-version-first", function()
-    t.assert.same({ "v2.0.0", "v1.0.0" }, gitcmd.all_tags(remote.work))
+    t.assert.same(
+      { "v2.0.0", "v1.0.0" },
+      await(function(done)
+        gitcmd.all_tags(remote.work, done)
+      end)
+    )
   end)
 end)
 
@@ -317,6 +344,75 @@ t.describe("WHEN both prefetch endpoints are the same revision", function()
     t.assert.equals(1, done_count)
     t.assert.equals("v1.0.0", gitcmd.tag_on_revision(remote.work, head))
     t.assert.is_nil(gitcmd.pending_updates_between(remote.work, head, head))
+  end)
+end)
+
+t.describe("WHEN one repo's tags are invalidated", function()
+  local function tagged(name)
+    local remote = gitfixture.new_remote(name)
+    gitfixture.commit(remote, "feat: initial", { ["a.txt"] = "1" })
+    gitfixture.tag(remote, "v1.0.0")
+    local head = vim.system({ "git", "-C", remote.work, "rev-parse", "HEAD" }, { text = true }):wait().stdout
+    return remote.work, vim.trim(head)
+  end
+  local fetched, fetched_head = tagged("fetchedrepo")
+  local other, other_head = tagged("otherrepo")
+  local function read(path, head)
+    gitcmd.tag_on_revision(path, head)
+    await(function(done)
+      gitcmd.tags_on_revision(path, head, done)
+    end)
+    await(function(done)
+      gitcmd.all_tags(path, done)
+    end)
+  end
+  read(fetched, fetched_head)
+  read(other, other_head)
+  gitcmd.invalidate_tags(fetched)
+
+  t.it("SHOULD keep every other repo's cached tags", function()
+    t.assert.equals(
+      0,
+      count_git_calls(function()
+        read(other, other_head)
+      end)
+    )
+  end)
+
+  t.it("SHOULD re-read the invalidated repo's tags", function()
+    t.assert.equals(
+      3,
+      count_git_calls(function()
+        read(fetched, fetched_head)
+      end)
+    )
+  end)
+
+  t.it("SHOULD reset every repo without a path", function()
+    gitcmd.invalidate_tags()
+    t.assert.equals(
+      3,
+      count_git_calls(function()
+        read(other, other_head)
+      end)
+    )
+  end)
+end)
+
+t.describe("WHEN git cannot be spawned for a tag listing", function()
+  local git = require("dash_paq.git")
+  local original = git.run
+  git.run = function()
+    error("ENOENT: no such file or directory")
+  end
+  local ok, tags = pcall(await, function(done)
+    gitcmd.all_tags("/nonexistent/spawnfail", done)
+  end)
+  git.run = original
+
+  t.it("SHOULD still answer, with no tags", function()
+    t.assert.truthy(ok, tags)
+    t.assert.same({}, tags)
   end)
 end)
 

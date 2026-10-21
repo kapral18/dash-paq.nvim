@@ -5,6 +5,7 @@ local rows = require("dash_paq.dashboard.report.rows")
 
 local M = {}
 
+M.pack_report_buffers = parser.pack_report_buffers
 M.refresh_pack_report_cache_from_report_buffer = parser.refresh_pack_report_cache_from_report_buffer
 M.run_refresh_pipeline = pipeline.run
 M.ensure_dashboard_cache = rows.ensure_dashboard_cache

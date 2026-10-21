@@ -75,11 +75,9 @@ local function detect_risky_star_pin(is_star, tags)
   return star_pick ~= intended
 end
 
--- One plugin per tick: each plugin can still run sync `git tag` calls
--- (gitcmd.tags_on_revision/all_tags), so a bigger per-tick batch would delay
--- input for too long on large plugin sets. `ms >= 1`: a 0ms `vim.defer_fn`
--- chain, like a bare `vim.schedule` chain, is not guaranteed to yield to
--- input between steps.
+-- One plugin per tick, and every Git query in it is async, so the scan never
+-- blocks input. `ms >= 1`: a 0ms `vim.defer_fn` chain, like a bare
+-- `vim.schedule` chain, is not guaranteed to yield to input between steps.
 local STEP_YIELD_MS = 1
 local subscribers = {}
 
@@ -95,29 +93,35 @@ local function complete_scan()
   end
 end
 
-local function read_checkout(plugin, declared)
-  local head = git.run({ "-C", plugin.path, "rev-parse", "HEAD" }, { text = true }):wait()
-  if head.code ~= 0 then
-    return nil
-  end
-  local refs = git
-    .run({ "-C", plugin.path, "for-each-ref", "--format=%(refname)", "refs/remotes/origin" }, { text = true })
-    :wait()
-  local branches = {}
-  for ref in vim.gsplit(refs.stdout or "", "\n", { trimempty = true }) do
-    branches[#branches + 1] = ref:gsub("^refs/remotes/origin/", "")
-  end
-  local rev = vim.trim(head.stdout)
-  local checkout = { rev = rev, branches = branches }
-  if type(declared) == "string" then
-    if not vim.tbl_contains(branches, declared) then
-      local target = git.run({ "-C", plugin.path, "rev-list", "-1", declared }, { text = true }):wait()
-      checkout.target_rev = target.code == 0 and vim.trim(target.stdout) or nil
+-- Calls `done(checkout)`, or `done(nil)` when HEAD is unreadable.
+local function read_checkout(plugin, declared, done)
+  git.run_async({ "-C", plugin.path, "rev-parse", "HEAD" }, function(head)
+    if head.code ~= 0 then
+      done(nil)
+      return
     end
-  else
-    checkout.tags = gitcmd.tags_on_revision(plugin.path, rev)
-  end
-  return checkout
+    git.run_async({ "-C", plugin.path, "for-each-ref", "--format=%(refname)", "refs/remotes/origin" }, function(refs)
+      local branches = {}
+      for ref in vim.gsplit(refs.stdout or "", "\n", { trimempty = true }) do
+        branches[#branches + 1] = ref:gsub("^refs/remotes/origin/", "")
+      end
+      local rev = vim.trim(head.stdout)
+      local checkout = { rev = rev, branches = branches }
+      if type(declared) ~= "string" then
+        gitcmd.tags_on_revision(plugin.path, rev, function(tags)
+          checkout.tags = tags
+          done(checkout)
+        end)
+      elseif vim.tbl_contains(branches, declared) then
+        done(checkout)
+      else
+        git.run_async({ "-C", plugin.path, "rev-list", "-1", declared }, function(target)
+          checkout.target_rev = target.code == 0 and vim.trim(target.stdout) or nil
+          done(checkout)
+        end)
+      end
+    end)
+  end)
 end
 
 local function refresh_version_flags_async(done)
@@ -149,43 +153,71 @@ local function refresh_version_flags_async(done)
     refresh_version_flags_async()
     return true
   end
-  -- Rows use the cached result on the next render, so slow git tag calls
-  -- never delay opening the dashboard.
-  local function step()
-    if restart_if_invalidated() then
-      return
-    end
-    local plugin = plugins[index]
-    if plugin then
-      index = index + 1
 
-      local name = plugin.spec and plugin.spec.name
-      local intent = type(name) == "string" and state.declared_versions_cache[name] or nil
-      local is_orphan = state.declared_names_published and not state.declared_names_cache[name] and not plugin.active
-      if type(intent) == "table" and not is_orphan then
-        local ok_checkout, checkout
-        if intent.resolved ~= nil then
-          ok_checkout, checkout = pcall(read_checkout, plugin, intent.resolved)
-        end
-        local flags = {
-          drift = (ok_checkout and checkout and compute_version_drift(intent.resolved, checkout)) or nil,
-          risky = detect_risky_star_pin(intent.star, intent.star and gitcmd.all_tags(plugin.path) or nil) or nil,
-        }
-        -- Git waits pump events, including native updates that invalidate us.
-        if restart_if_invalidated() then
-          return
-        end
-        state.version_flags_cache[name] = flags
-      end
-    end
-
+  local step
+  local function advance()
     if index <= #plugins then
       vim.defer_fn(step, STEP_YIELD_MS)
       return
     end
-
     state.version_flags_scanned = true
     complete_scan()
+  end
+
+  -- Rows use the cached result on the next render, so slow git tag calls
+  -- never delay opening the dashboard.
+  step = function()
+    if restart_if_invalidated() then
+      return
+    end
+    local plugin = plugins[index]
+    if not plugin then
+      advance()
+      return
+    end
+    index = index + 1
+
+    local name = plugin.spec and plugin.spec.name
+    local intent = type(name) == "string" and state.declared_versions_cache[name] or nil
+    local is_orphan = state.declared_names_published and not state.declared_names_cache[name] and not plugin.active
+    if type(intent) ~= "table" or is_orphan then
+      advance()
+      return
+    end
+
+    local function record(checkout, star_tags)
+      -- Git callbacks yield to input, including native updates that invalidate us.
+      if restart_if_invalidated() then
+        return
+      end
+      -- A throw here would leave the scan running forever, and refresh
+      -- finalize waits on the scan to release the row-op lock.
+      local ok_flags, flags = pcall(function()
+        return {
+          drift = (checkout and compute_version_drift(intent.resolved, checkout)) or nil,
+          risky = detect_risky_star_pin(intent.star, star_tags) or nil,
+        }
+      end)
+      if not ok_flags then
+        require("dash_paq.notify").err("Version flag check failed for " .. name .. ": " .. tostring(flags))
+      end
+      state.version_flags_cache[name] = ok_flags and flags or {}
+      advance()
+    end
+    local function with_star_tags(checkout)
+      if intent.star then
+        gitcmd.all_tags(plugin.path, function(tags)
+          record(checkout, tags)
+        end)
+      else
+        record(checkout, nil)
+      end
+    end
+    if intent.resolved ~= nil then
+      read_checkout(plugin, intent.resolved, with_star_tags)
+    else
+      with_star_tags(nil)
+    end
   end
 
   vim.defer_fn(step, STEP_YIELD_MS)

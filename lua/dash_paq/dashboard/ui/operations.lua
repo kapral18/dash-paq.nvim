@@ -112,13 +112,9 @@ function M.update_by_names(ctx, names, empty_msg, noop_msg)
       return outcomes
     end,
     on_finalize = function()
-      if applied > 0 then
-        state.pack_report_cache.last_applied_at = os.time()
-        state.pack_report_cache.last_applied_count = applied
-        if state.version_policy_enabled then
-          -- Policy work yields between plugins and skips an overlapping refresh.
-          pcall(policy.refresh_version_policy_async)
-        end
+      if applied > 0 and state.version_policy_enabled then
+        -- Policy work yields between plugins and skips an overlapping refresh.
+        pcall(policy.refresh_version_policy_async)
       end
     end,
   })

@@ -8,7 +8,7 @@ local M = {}
 local COMMAND = "DashPaq"
 
 ---@class dash_paq.Subcommand
----@field impl fun(args: string[], opts: { bang: boolean, raw: string })
+---@field impl fun(args: string[], opts: { bang: boolean })
 ---@field complete? fun(arglead: string, args: string[]): string[]
 ---@field bang? boolean
 ---@field usage string shown in the usage error, e.g. "trace [plugin]"
@@ -62,10 +62,7 @@ local function run(cmd)
     vim.notify(COMMAND .. ": '!' is not valid for '" .. tostring(name) .. "'", vim.log.levels.ERROR)
     return
   end
-  -- `raw` is everything after the subcommand name, untouched, so a path
-  -- argument may contain spaces.
-  local raw = name and vim.trim((cmd.args:gsub("^%s*%S+", "", 1))) or ""
-  def.impl(vim.list_slice(fargs, 2), { bang = cmd.bang, raw = raw })
+  def.impl(vim.list_slice(fargs, 2), { bang = cmd.bang })
 end
 
 -- Neovim supplies the whole command line and a byte offset for the cursor.
@@ -102,7 +99,7 @@ local function ensure_command()
     nargs = "*",
     bang = true,
     complete = M.complete,
-    desc = "dash-paq: dashboard, sync/status reports, load trace, lockfile, version policy",
+    desc = "dash-paq: dashboard, sync/status reports, load trace, version policy",
   })
 end
 

@@ -153,33 +153,76 @@ t.describe("WHEN a local branch shares the declared tag name", function()
   end)
 end)
 
+t.describe("WHEN a flag check throws for one plugin", function()
+  t.it("SHOULD still finish the scan and notify its subscribers", function()
+    local intent = state.declared_versions_cache.pinned
+    state.declared_versions_cache.pinned = {
+      resolved = {
+        has = function()
+          error("boom")
+        end,
+      },
+    }
+    local notify = require("dash_paq.notify")
+    local orig_err = notify.err
+    local errors = {}
+    notify.err = function(msg)
+      errors[#errors + 1] = msg
+    end
+    state.invalidate_version_flags()
+    local done = false
+    version.refresh_version_flags_async(function()
+      done = true
+    end)
+    local ok, err = pcall(t.wait_until, function()
+      return done
+    end, 5000, "scan never finished")
+    notify.err = orig_err
+    state.declared_versions_cache.pinned = intent
+    state.invalidate_version_flags()
+    t.assert.truthy(ok, err)
+    t.assert.falsy(state.version_flags_scan_running)
+    t.assert.match("pinned: .*boom", errors[1] or "")
+  end)
+end)
+
+-- `scope` is the invalidate_tags argument: nil resets every repo, `path` only this one.
+local function invalidated_during_wait(scope)
+  local git = require("dash_paq.git")
+  local tags = require("dash_paq.dashboard.analysis.gitcmd")
+  tags.invalidate_tags()
+  pcall(fixture.run, { "git", "-C", path, "tag", "-d", "v20.0.0" })
+  local original = git.run
+  local interrupted = false
+  git.run = function(args, opts, callback)
+    local job = original(args, opts, callback)
+    if not interrupted and args[3] == "tag" and args[4] == "--points-at" then
+      interrupted = true
+      return {
+        wait = function(_, timeout)
+          local result = job:wait(timeout)
+          fixture.run({ "git", "-C", path, "tag", "v20.0.0", v1 })
+          tags.invalidate_tags(scope)
+          return result
+        end,
+      }
+    end
+    return job
+  end
+  local ok, before = pcall(tags.tag_on_revision, path, v1)
+  git.run = original
+  t.assert.truthy(ok, before)
+  t.assert.equals("v1.0.0", before)
+  t.assert.equals("v20.0.0", tags.tag_on_revision(path, v1))
+end
+
 t.describe("WHEN a tag query is invalidated during its Git wait", function()
   t.it("SHOULD leave the replacement cache free of the old result", function()
-    local git = require("dash_paq.git")
-    local tags = require("dash_paq.dashboard.analysis.gitcmd")
-    tags.invalidate_tags()
-    local original = git.run
-    local interrupted = false
-    git.run = function(args, opts, callback)
-      local job = original(args, opts, callback)
-      if not interrupted and args[3] == "tag" and args[4] == "--points-at" then
-        interrupted = true
-        return {
-          wait = function(_, timeout)
-            local result = job:wait(timeout)
-            fixture.run({ "git", "-C", path, "tag", "v20.0.0", v1 })
-            tags.invalidate_tags()
-            return result
-          end,
-        }
-      end
-      return job
-    end
-    local ok, before = pcall(tags.tag_on_revision, path, v1)
-    git.run = original
-    t.assert.truthy(ok, before)
-    t.assert.equals("v1.0.0", before)
-    t.assert.equals("v20.0.0", tags.tag_on_revision(path, v1))
+    invalidated_during_wait(nil)
+  end)
+
+  t.it("SHOULD do the same when only that repo is invalidated", function()
+    invalidated_during_wait(path)
   end)
 end)
 
@@ -205,18 +248,18 @@ local version = require("dash_paq.dashboard.analysis.version")
 local git = require("dash_paq.git")
 local original = git.run
 local interrupted = false
--- :wait() pumps events; a native checkout can finish before it returns.
+-- The scan yields while Git runs; a native checkout can finish before the answer arrives.
 git.run = function(args, opts, callback)
-  local job = original(args, opts, callback)
   if not interrupted and args[3] == "rev-parse" and args[4] == "HEAD" then
     interrupted = true
-    return {wait=function(_, timeout)
-      local result = job:wait(timeout)
-      vim.pack.update({"generation"}, {offline=true,force=true})
-      return result
-    end}
+    return original(args, opts, function(result)
+      vim.schedule(function()
+        vim.pack.update({"generation"}, {offline=true,force=true})
+        callback(result)
+      end)
+    end)
   end
-  return job
+  return original(args, opts, callback)
 end
 local callbacks = 0
 version.refresh_version_flags_async(function() callbacks = callbacks + 1 end)

@@ -6,11 +6,6 @@ M.pack_report_cache = {
   plugins = {},
   updated_at = nil,
   mode = nil,
-  last_online_at = nil,
-  last_offline_at = nil,
-  last_applied_at = nil,
-  last_applied_count = 0,
-  last_check_counts = nil,
 }
 
 M.dashboard_ui_cache = {
@@ -137,11 +132,6 @@ function M.write_persisted_state()
   local payload = {
     updated_at = normalize_epoch(cache.updated_at),
     mode = cache.mode,
-    last_online_at = normalize_epoch(cache.last_online_at),
-    last_offline_at = normalize_epoch(cache.last_offline_at),
-    last_applied_at = normalize_epoch(cache.last_applied_at),
-    last_applied_count = tonumber(cache.last_applied_count) or 0,
-    last_check_counts = cache.last_check_counts,
     plugins = cache.plugins,
     ui = {
       filter_mode = ui.filter_mode,
@@ -165,10 +155,6 @@ function M.load_persisted_state_once()
 
   local cache = M.pack_report_cache
   cache.updated_at = normalize_epoch(decoded.updated_at)
-  cache.last_online_at = normalize_epoch(decoded.last_online_at)
-  cache.last_offline_at = normalize_epoch(decoded.last_offline_at)
-  cache.last_applied_at = normalize_epoch(decoded.last_applied_at)
-  cache.last_applied_count = tonumber(decoded.last_applied_count) or 0
   if type(decoded.plugins) == "table" then
     local restored = {}
     for name, info in pairs(decoded.plugins) do
@@ -177,13 +163,6 @@ function M.load_persisted_state_once()
       end
     end
     cache.plugins = restored
-  end
-  if type(decoded.last_check_counts) == "table" then
-    cache.last_check_counts = {
-      update = tonumber(decoded.last_check_counts.update) or 0,
-      same = tonumber(decoded.last_check_counts.same) or 0,
-      error = tonumber(decoded.last_check_counts.error) or 0,
-    }
   end
 
   if decoded.mode == "online" or decoded.mode == "offline" or decoded.mode == "unknown" then

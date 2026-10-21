@@ -74,10 +74,8 @@ t.describe("the `U` op updates a plugin with a pending update", function()
     return ctx.online_check_running == false
   end, 10000, "initial online refresh never finished")
 
-  t.it("stamps only the online check time after an online refresh", function()
+  t.it("records an online check after an online refresh", function()
     t.assert.equals("online", cache.mode)
-    t.assert.truthy(cache.last_online_at)
-    t.assert.is_nil(cache.last_offline_at)
   end)
 
   refresh.refresh(ctx, false)
@@ -85,9 +83,8 @@ t.describe("the `U` op updates a plugin with a pending update", function()
     return ctx.online_check_running == false
   end, 10000, "offline refresh never finished")
 
-  t.it("stamps the offline check time after an offline refresh", function()
+  t.it("records an offline check after an offline refresh", function()
     t.assert.equals("offline", cache.mode)
-    t.assert.truthy(cache.last_offline_at)
   end)
 
   t.it("has detected the pending update before running the update op", function()
@@ -125,34 +122,9 @@ end)
 t.describe(":DashPaq with the dashboard enabled", function()
   t.it("registers the loader and dashboard subcommands", function()
     t.assert.same(
-      { "load", "lock", "policy-rebuild", "stats", "status", "sync", "toggle-dev", "trace" },
+      { "load", "policy-rebuild", "status", "sync", "toggle-dev", "trace" },
       vim.fn.getcompletion("DashPaq ", "cmdline")
     )
-  end)
-
-  t.it("completes lock actions", function()
-    t.assert.same({ "export", "import", "info" }, vim.fn.getcompletion("DashPaq lock ", "cmdline"))
-  end)
-
-  t.it("exports the lockfile to a path containing a space", function()
-    local dest = vim.fs.joinpath(vim.fn.stdpath("state"), "lock export", "lock.json")
-    vim.cmd("DashPaq lock export " .. dest)
-    t.assert.equals(1, vim.fn.filereadable(dest))
-  end)
-
-  t.it("imports a lockfile and says to restart, then update to the lockfile", function()
-    local dest = vim.fs.joinpath(vim.fn.stdpath("state"), "lock export", "lock.json")
-    local notes = {}
-    local orig = vim.notify
-    vim.notify = function(msg)
-      notes[#notes + 1] = msg
-    end
-    vim.cmd("DashPaq lock import " .. dest)
-    vim.notify = orig
-    t.assert.equals(1, #notes)
-    t.assert.truthy(notes[1]:find("Restart now", 1, true))
-    t.assert.truthy(notes[1]:find("vim.pack.update(nil, { target = 'lockfile' })", 1, true))
-    t.assert.truthy(notes[1]:find("Restart now", 1, true) < notes[1]:find("target = 'lockfile'", 1, true))
   end)
 
   t.it("reaches policy-rebuild, which warns while the policy is disabled", function()
@@ -166,6 +138,24 @@ t.describe(":DashPaq with the dashboard enabled", function()
     t.assert.equals(1, #notes)
     t.assert.equals(vim.log.levels.WARN, notes[1].level)
     t.assert.match("Version policy is disabled", notes[1].msg)
+  end)
+
+  t.it("keeps the last check's mode when sync opens no new report buffer", function()
+    local cache = require("dash_paq.dashboard.state").pack_report_cache
+    -- A confirm buffer left open by an earlier check must not count as this check's report.
+    local leftover = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_name(leftover, "nvim-pack://confirm#leftover")
+    local before = cache.mode
+    local before_at = cache.updated_at
+    local orig = vim.pack.update
+    vim.pack.update = function() end
+    local ok, err = pcall(vim.cmd, "DashPaq sync")
+    vim.pack.update = orig
+    vim.api.nvim_buf_delete(leftover, { force = true })
+    t.assert.truthy(ok, err)
+    t.assert.equals("offline", before)
+    t.assert.equals(before, cache.mode)
+    t.assert.equals(before_at, cache.updated_at)
   end)
 end)
 

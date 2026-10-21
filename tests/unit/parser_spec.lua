@@ -11,17 +11,15 @@ end
 local function parse_fixture(name)
   local bufnr = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, fixture_lines(name))
-  local counts = parser.parse_pack_report_buffer(bufnr)
-  return counts, vim.deepcopy(state.pack_report_cache.plugins)
+  parser.parse_pack_report_buffer(bufnr)
+  return vim.deepcopy(state.pack_report_cache.plugins)
 end
 
 t.describe("parsing a real 0.12.4 report with an Update and a Same section", function()
-  local counts, plugins = parse_fixture("report_0.12.4_update_and_same.txt")
+  local plugins = parse_fixture("report_0.12.4_update_and_same.txt")
 
-  t.it("counts one update and one same", function()
-    t.assert.equals(1, counts.update)
-    t.assert.equals(1, counts.same)
-    t.assert.equals(0, counts.error)
+  t.it("records exactly the update and the same plugin", function()
+    t.assert.same({ "samestatic", "tagged" }, vim.fn.sort(vim.tbl_keys(plugins)))
   end)
 
   t.it("captures the update plugin's path/source/revisions/target version", function()
@@ -49,15 +47,10 @@ t.describe("parsing a real 0.12.4 report with an Update and a Same section", fun
 end)
 
 t.describe("parsing a real 0.12.4 report with an Error section", function()
-  local counts, plugins = parse_fixture("report_0.12.4_error.txt")
+  local plugins = parse_fixture("report_0.12.4_error.txt")
 
-  t.it("counts one error and no update/same", function()
-    t.assert.equals(1, counts.error)
-    t.assert.equals(0, counts.update)
-    t.assert.equals(0, counts.same)
-  end)
-
-  t.it("records the errored plugin by name", function()
+  t.it("records only the errored plugin, by name", function()
+    t.assert.same({ "badref" }, vim.tbl_keys(plugins))
     t.assert.truthy(plugins.badref ~= nil)
     t.assert.equals("error", plugins.badref.status)
   end)
@@ -79,9 +72,8 @@ t.describe("a plugin heading carries the '(not active)' suffix", function()
       "Source:   file:///tmp/notactive-remote.git",
       "Revision: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (main)",
     })
-    local counts = parser.parse_pack_report_buffer(bufnr)
-    t.assert.equals(1, counts.same)
-    t.assert.truthy(state.pack_report_cache.plugins.notactive ~= nil)
+    parser.parse_pack_report_buffer(bufnr)
+    t.assert.equals("same", state.pack_report_cache.plugins.notactive.status)
   end)
 end)
 
@@ -92,6 +84,25 @@ t.describe("locating the live confirm buffer among other buffers", function()
     local confirm = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_buf_set_name(confirm, "nvim-pack://confirm#42")
     t.assert.equals(confirm, parser.find_pack_report_buffer())
+  end)
+end)
+
+t.describe("WHEN parsing a new report fails", function()
+  t.it("SHOULD keep the previous check's mode", function()
+    local analysis = require("dash_paq.dashboard.analysis")
+    local original = analysis.infer_breaking_status
+    analysis.infer_breaking_status = function()
+      error("boom")
+    end
+    state.pack_report_cache.mode = "offline"
+    local bufnr = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_name(bufnr, "nvim-pack://confirm#parsefail")
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, fixture_lines("report_0.12.4_update_and_same.txt"))
+    local ok = pcall(parser.refresh_pack_report_cache_from_report_buffer, {}, "online")
+    analysis.infer_breaking_status = original
+    vim.api.nvim_buf_delete(bufnr, { force = true })
+    t.assert.falsy(ok)
+    t.assert.equals("offline", state.pack_report_cache.mode)
   end)
 end)
 

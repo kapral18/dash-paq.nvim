@@ -32,7 +32,14 @@ t.describe("git calls under an exported GIT_DIR", function()
 
   t.it("dashboard tag queries read the plugin's own tags", function()
     local gitcmd = require("dash_paq.dashboard.analysis.gitcmd")
-    t.assert.same({ "v1.2.3" }, gitcmd.all_tags(path))
+    local tags
+    gitcmd.all_tags(path, function(result)
+      tags = result
+    end)
+    t.wait_until(function()
+      return tags ~= nil
+    end, 5000, "tag listing never answered")
+    t.assert.same({ "v1.2.3" }, tags)
     local head =
       vim.trim(vim.fn.system({ "git", "-C", plug.work, "--git-dir", plug.work .. "/.git", "rev-parse", "HEAD" }))
     t.assert.equals("v1.2.3", gitcmd.tag_on_revision(path, head))

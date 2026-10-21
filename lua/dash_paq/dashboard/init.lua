@@ -1,11 +1,9 @@
 local state = require("dash_paq.dashboard.state")
 local report = require("dash_paq.dashboard.report")
 local ui = require("dash_paq.dashboard.ui")
-local lockfile = require("dash_paq.dashboard.lockfile")
 local analysis = require("dash_paq.dashboard.analysis")
 local policy = require("dash_paq.policy")
 local commands = require("dash_paq.commands")
-local fs = require("dash_paq.fs")
 local gitcmd = require("dash_paq.dashboard.analysis.gitcmd")
 
 local M = {}
@@ -57,126 +55,13 @@ local function installed_plugin_complete(arglead, done)
 end
 
 local function check_updates(offline)
+  local stale = report.pack_report_buffers()
   vim.pack.update(nil, { offline = offline })
   invalidate_version_evidence()
-  local counts = report.refresh_pack_report_cache_from_report_buffer()
-  if counts then
-    state.pack_report_cache.last_check_counts = counts
-  end
-  state.pack_report_cache.mode = offline and "offline" or "online"
-  state.pack_report_cache[offline and "last_offline_at" or "last_online_at"] = os.time()
-  state.write_persisted_state()
+  report.refresh_pack_report_cache_from_report_buffer(stale, offline and "offline" or "online")
   if version_policy_enabled then
     pcall(refresh_version_policy_if_needed)
   end
-end
-
-local function stats()
-  local raw = state.pack_report_cache.last_check_counts
-  local raw_text = "update:n/a same:n/a error:n/a"
-  if type(raw) == "table" then
-    raw_text = string.format(
-      "update:%d same:%d error:%d",
-      tonumber(raw.update) or 0,
-      tonumber(raw.same) or 0,
-      tonumber(raw.error) or 0
-    )
-  end
-  local checked = state.format_cache_stamp(state.pack_report_cache.updated_at)
-  local online = state.format_cache_stamp(state.pack_report_cache.last_online_at)
-  local offline = state.format_cache_stamp(state.pack_report_cache.last_offline_at)
-  local applied = state.format_cache_stamp(state.pack_report_cache.last_applied_at)
-  local applied_count = tonumber(state.pack_report_cache.last_applied_count) or 0
-  vim.notify(
-    string.format(
-      "DashPaq last-check [%s] mode:%s result:%s online:%s offline:%s applied:%s (%d)",
-      raw_text,
-      state.pack_report_cache.mode or "unknown",
-      checked,
-      online,
-      offline,
-      applied,
-      applied_count
-    ),
-    vim.log.levels.INFO
-  )
-end
-
-local function lock_info()
-  local path = lockfile.path()
-  if vim.fn.filereadable(path) ~= 1 then
-    vim.notify("vim.pack lockfile not found at " .. path, vim.log.levels.WARN)
-    return
-  end
-  local decoded = fs.read_json(path)
-  local plugins = decoded and type(decoded.plugins) == "table" and vim.tbl_count(decoded.plugins) or 0
-  local stat = vim.uv.fs_stat(path)
-  local mtime = stat and os.date("%Y-%m-%d %H:%M:%S", stat.mtime.sec) or "unknown"
-  vim.notify(
-    string.format("vim.pack lockfile: %s\n  plugins: %d\n  mtime:   %s", path, plugins, mtime),
-    vim.log.levels.INFO
-  )
-end
-
-local function lock_export(dest)
-  if dest == "" then
-    vim.notify("Usage: :DashPaq lock export <path>", vim.log.levels.WARN)
-    return
-  end
-  local ok, result = lockfile.export(dest)
-  if ok then
-    vim.notify("Exported lockfile → " .. result, vim.log.levels.INFO)
-  else
-    vim.notify("DashPaq lock export failed: " .. tostring(result), vim.log.levels.ERROR)
-  end
-end
-
-local function lock_import(source)
-  if source == "" then
-    vim.notify("Usage: :DashPaq lock import <path>", vim.log.levels.WARN)
-    return
-  end
-  local ok, result = lockfile.import(source)
-  if ok then
-    vim.notify(
-      "Imported lockfile from "
-        .. source
-        .. " → "
-        .. result
-        .. ". Restart now: until then, any applied vim.pack update or delete writes the old lockfile back. After the"
-        .. " restart, run `:lua vim.pack.update(nil, { target = 'lockfile' })` to move installed plugins to it.",
-      vim.log.levels.INFO
-    )
-  else
-    vim.notify("DashPaq lock import failed: " .. tostring(result), vim.log.levels.ERROR)
-  end
-end
-
-local LOCK_ACTIONS = { "info", "export", "import" }
-
-local function lock(args, opts)
-  local action = args[1]
-  -- The path is the raw remainder after the action, so it may contain spaces.
-  local path = vim.trim(opts.raw:match("^%S+(.*)$") or "")
-  if action == "info" then
-    lock_info()
-  elseif action == "export" then
-    lock_export(path)
-  elseif action == "import" then
-    lock_import(path)
-  else
-    vim.notify("Usage: :DashPaq lock info|export <path>|import <path>", vim.log.levels.WARN)
-  end
-end
-
-local function lock_complete(arglead, done)
-  if #done == 0 then
-    return commands.filter(LOCK_ACTIONS, arglead)
-  end
-  if done[1] == "export" or done[1] == "import" then
-    return vim.fn.getcompletion(arglead, "file")
-  end
-  return {}
 end
 
 local function policy_rebuild(args)
@@ -258,8 +143,6 @@ function M.setup(config)
       check_updates(true)
     end,
   })
-  commands.register("stats", { usage = "stats", impl = stats })
-  commands.register("lock", { usage = "lock info|export <path>|import <path>", impl = lock, complete = lock_complete })
   commands.register("policy-rebuild", {
     usage = "policy-rebuild [plugin]",
     impl = policy_rebuild,

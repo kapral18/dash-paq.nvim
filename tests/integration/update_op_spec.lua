@@ -114,10 +114,6 @@ t.describe("the `U` op updates 3 plugins whose vim.pack.update blocks by pumping
     t.assert.equals(#names, apply_calls_at_finalize)
   end)
 
-  t.it("has applied every update row exactly once", function()
-    t.assert.equals(#names, state.pack_report_cache.last_applied_count)
-  end)
-
   t.it("leaves every row 'same'", function()
     local statuses = {}
     for _, row in ipairs(ctx.rows or {}) do
@@ -326,10 +322,6 @@ t.describe("closing the dashboard buffer mid-op does not leak the step timer", f
     t.assert.falsy(close_ctx.online_check_running)
   end)
 
-  t.it("recorded every row as applied", function()
-    t.assert.equals(#names, state.pack_report_cache.last_applied_count)
-  end)
-
   local settled = false
   vim.defer_fn(function()
     settled = true
@@ -459,10 +451,6 @@ t.describe("apply_batch_size = 2 with 3 pending updates", function()
     table.sort(seen)
     t.assert.same(vim.deepcopy(names), seen)
   end)
-
-  t.it("counts every applied row", function()
-    t.assert.equals(#names, state.pack_report_cache.last_applied_count)
-  end)
 end)
 
 t.describe("WHEN native checkout fails for one plugin in an update", function()
@@ -485,7 +473,6 @@ t.describe("WHEN native checkout fails for one plugin in an update", function()
     vim.fn.delete(lock)
     t.assert.equals("error", report.collect_dashboard_row("alpha").status)
     t.assert.equals("same", report.collect_dashboard_row("beta").status)
-    t.assert.equals(1, state.pack_report_cache.last_applied_count)
   end)
 end)
 
@@ -527,22 +514,34 @@ t.describe("WHEN another checkout reaches a queued update's target", function()
       return not ctx.online_check_running
     end, 5000, "race setup incomplete")
     local pipeline = report.run_refresh_pipeline
-    local previous_time = state.pack_report_cache.last_applied_at
-    local previous_count = state.pack_report_cache.last_applied_count
+    -- An applied row starts the version-policy refresh; this one must not count as applied.
+    local prev_enabled = state.version_policy_enabled
+    state.version_policy_enabled = true
+    local orig_async = policy.refresh_version_policy_async
+    local async_calls = 0
+    policy.refresh_version_policy_async = function()
+      async_calls = async_calls + 1
+    end
     report.run_refresh_pipeline = function(targets, online, each, done)
       pipeline(targets, online, each, function(...)
         vim.pack.update({ "alpha" }, { offline = true, force = true })
         done(...)
       end)
     end
-    operations.update_by_names(ctx, { "alpha" })
-    t.wait_until(function()
-      return not ctx.online_check_running
-    end, 5000, "queued checkout incomplete")
+    local ok, err = pcall(function()
+      operations.update_by_names(ctx, { "alpha" })
+      t.wait_until(function()
+        return not ctx.online_check_running
+      end, 5000, "queued checkout incomplete")
+    end)
     report.run_refresh_pipeline = pipeline
+    policy.refresh_version_policy_async = orig_async
+    state.version_policy_enabled = prev_enabled
+    if not ok then
+      error(err, 0)
+    end
     t.assert.equals("same", report.collect_dashboard_row("alpha").status)
-    t.assert.equals(previous_time, state.pack_report_cache.last_applied_at)
-    t.assert.equals(previous_count, state.pack_report_cache.last_applied_count)
+    t.assert.equals(0, async_calls)
   end)
 end)
 

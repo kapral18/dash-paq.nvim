@@ -16,7 +16,6 @@ local function parse_pack_report_buffer(bufnr)
   local current_group = nil
   local current_plugin = nil
   local plugins = {}
-  local counts = { update = 0, same = 0, error = 0 }
 
   for _, line in ipairs(lines) do
     local section = line:match("^#%s+(%u%l+)")
@@ -38,9 +37,6 @@ local function parse_pack_report_buffer(bufnr)
           collect_pending = current_group == "error",
         }
         plugins[name] = current_plugin
-        if counts[current_group] ~= nil then
-          counts[current_group] = counts[current_group] + 1
-        end
       elseif current_plugin then
         local path = line:match("^Path:%s+(.+)$")
         if path then
@@ -109,38 +105,59 @@ local function parse_pack_report_buffer(bufnr)
   state.pack_report_cache.plugins = plugins
   state.pack_report_cache.updated_at = os.time()
   state.write_persisted_state()
-  return counts
 end
 
-local function find_pack_report_buffer()
+local function is_pack_report_buffer(bufnr)
+  return vim.api.nvim_buf_is_valid(bufnr) and vim.api.nvim_buf_get_name(bufnr):match("^nvim%-pack://confirm#") ~= nil
+end
+
+local function pack_report_buffers()
+  local set = {}
+  for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+    if is_pack_report_buffer(bufnr) then
+      set[bufnr] = true
+    end
+  end
+  return set
+end
+
+-- `stale`: set of report buffers to skip, e.g. ones left open by an earlier check.
+local function find_pack_report_buffer(stale)
+  stale = stale or {}
   local current = vim.api.nvim_get_current_buf()
-  local current_name = vim.api.nvim_buf_get_name(current)
-  if current_name:match("^nvim%-pack://confirm#") then
+  if is_pack_report_buffer(current) and not stale[current] then
     return current
   end
 
   local matched = nil
   for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
-    if vim.api.nvim_buf_is_valid(bufnr) then
-      local name = vim.api.nvim_buf_get_name(bufnr)
-      if name:match("^nvim%-pack://confirm#") then
-        matched = bufnr
-      end
+    if is_pack_report_buffer(bufnr) and not stale[bufnr] then
+      matched = bufnr
     end
   end
 
   return matched
 end
 
-local function refresh_pack_report_cache_from_report_buffer()
-  local bufnr = find_pack_report_buffer()
-  if bufnr then
-    return parse_pack_report_buffer(bufnr), bufnr
+-- Records `mode` with the parsed report in one persisted write. With no new
+-- report buffer (e.g. no managed plugins) the cache keeps the last check's mode.
+local function refresh_pack_report_cache_from_report_buffer(stale, mode)
+  local bufnr = find_pack_report_buffer(stale)
+  if not bufnr then
+    return
   end
-  return nil, nil
+  local previous = state.pack_report_cache.mode
+  state.pack_report_cache.mode = mode
+  -- A failed parse keeps the old report, so it keeps the old mode too.
+  local ok, err = pcall(parse_pack_report_buffer, bufnr)
+  if not ok then
+    state.pack_report_cache.mode = previous
+    error(err, 0)
+  end
 end
 
 M.parse_pack_report_buffer = parse_pack_report_buffer
+M.pack_report_buffers = pack_report_buffers
 M.find_pack_report_buffer = find_pack_report_buffer
 M.refresh_pack_report_cache_from_report_buffer = refresh_pack_report_cache_from_report_buffer
 

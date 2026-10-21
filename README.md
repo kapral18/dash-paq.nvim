@@ -82,12 +82,8 @@ Everything is a subcommand of `:DashPaq`; subcommands and their arguments comple
 | `:DashPaq[!]` | Open the dashboard; `!` closes and reopens it. |
 | `:DashPaq sync` | Fetch remotes and open `vim.pack`'s update confirmation. |
 | `:DashPaq status` | Open the same confirmation using local refs, without fetching. |
-| `:DashPaq stats` | Show the last check counts and check/apply times. |
 | `:DashPaq trace [plugin]` | Show load status, reason, time, and triggers. |
 | `:DashPaq load <plugin>` | Load a deferred plugin. |
-| `:DashPaq lock info` | Show lockfile path, plugin count, and modification time. |
-| `:DashPaq lock export <path>` | Copy the lockfile to a file or directory. |
-| `:DashPaq lock import <path>` | Overwrite the lockfile. Restart before any update or deletion; see `:h :DashPaq-lock`. |
 | `:DashPaq policy-rebuild [plugin]` | Recompute the cached tag/branch policy. |
 | `:DashPaq toggle-dev <plugin>` | Save an upstream/dev switch for the next restart. |
 

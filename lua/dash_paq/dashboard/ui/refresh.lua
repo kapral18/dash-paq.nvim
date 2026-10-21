@@ -208,7 +208,6 @@ end
 --   apply_rows(names, results): blocking checkout; returns per-name status/error
 --   apply_batch_size: maximum rows per checkout call (default 1)
 --   on_finalize(counts): cache updates before final rendering
---   done_notify(counts): completion hook after final rendering
 local function execute_row_op(ctx, spec)
   -- Set once the op has ended (finalized or aborted): late pipeline callbacks
   -- and drain steps then return without touching the dashboard.
@@ -267,9 +266,7 @@ local function execute_row_op(ctx, spec)
         end
         state.write_persisted_state()
         M.update_after_scan(ctx, current_name)
-        if spec.done_notify then
-          guarded(spec.done_notify, counts)
-        elseif counts.error > 0 then
+        if counts.error > 0 then
           vim.notify(
             string.format("%d plugin(s) failed to refresh; see the failed rows", counts.error),
             vim.log.levels.WARN
@@ -468,16 +465,10 @@ function M.refresh(ctx, online)
   M.run_row_op(ctx, {
     online = online,
     label = online and "Refreshing online" or "Refreshing offline",
-    on_finalize = function(counts)
+    on_finalize = function()
       local cache = state.pack_report_cache
-      cache.last_check_counts = counts
       cache.mode = online and "online" or "offline"
       cache.updated_at = os.time()
-      if online then
-        cache.last_online_at = cache.updated_at
-      else
-        cache.last_offline_at = cache.updated_at
-      end
     end,
   })
 end
