@@ -44,13 +44,6 @@ local function top_level_modules(entry)
   return names
 end
 
--- True while `entry` is still a require-trigger candidate: enabled, and not
--- already mid-load or loaded by some other route. A disabled entry, or one
--- already loaded/loading, is never (re)loaded from here.
-local function is_eligible(entry, state)
-  return entry ~= nil and entry.enabled and state ~= nil and state.status ~= "loaded" and state.status ~= "loading"
-end
-
 -- Loaded entries retain provider precedence; entries mid-load may be required
 -- by their dependencies. Shared namespaces keep dependency order.
 local function build_top_map(ctx)
@@ -58,7 +51,7 @@ local function build_top_map(ctx)
   local unavailable = {}
   for _, entry in ipairs(ctx.sorted) do
     local state = ctx.entry_state[entry.name]
-    if entry.enabled and state then
+    if entry.enabled then
       local names = top_level_modules(entry)
       if not names and state.status ~= "loaded" then
         unavailable[#unavailable + 1] = entry
@@ -81,18 +74,13 @@ local function module_path(entry, modname)
   return package.searchpath(modname, lua_dir .. "/?.lua;" .. lua_dir .. "/?/init.lua")
 end
 
--- Loader for `modname` straight from a mid-load `entry`'s own `lua/` dir, or
+-- Loader for `path` (the module file in a mid-load `entry`'s own `lua/` dir), or
 -- nil once its root is on 'runtimepath' (Neovim's rtp searcher handles it
 -- then). An entry's dependencies load before its root reaches 'runtimepath'
 -- (rtp order follows load order), and a dependency's plugin/after files may
 -- require the entry itself (e.g. nvim-cmp sources requiring "cmp").
-local function loading_entry_loader(entry, modname)
-  local root = triggers_mod.resolve_root(entry)
-  if type(root) ~= "string" or root == "" or vim.tbl_contains(vim.opt.rtp:get(), root) then
-    return nil
-  end
-  local path = module_path(entry, modname)
-  if not path then
+local function loading_entry_loader(entry, path)
+  if vim.tbl_contains(vim.opt.rtp:get(), triggers_mod.resolve_root(entry)) then
     return nil
   end
   local chunk, err = loadfile(path)
@@ -105,24 +93,21 @@ end
 -- Load the owning entry, then let Neovim resolve the module from runtimepath.
 -- A dependency can require its parent mid-load; serve that module directly.
 local function searcher(modname)
-  if not current then
-    return nil
-  end
   if not current.top_map then
     current.top_map, current.unavailable = build_top_map(current)
   else
     for _, entry in ipairs(current.unavailable) do
-      local state = current.entry_state[entry.name]
-      if entry.enabled and state and state.status ~= "loaded" and top_level_modules(entry) then
+      if current.entry_state[entry.name].status ~= "loaded" and top_level_modules(entry) then
         current.top_map, current.unavailable = build_top_map(current)
         break
       end
     end
   end
   local top = modname:match("^[^.]+")
-  local entry_name
+  local entry_name, path
   for _, name in ipairs(top and current.top_map[top] or {}) do
-    if module_path(current.entries[name], modname) then
+    path = module_path(current.entries[name], modname)
+    if path then
       entry_name = name
       break
     end
@@ -130,12 +115,11 @@ local function searcher(modname)
   if not entry_name then
     return nil
   end
-  local entry = current.entries[entry_name]
-  local state = current.entry_state[entry_name]
-  if entry and entry.enabled and state and state.status == "loading" then
-    return loading_entry_loader(entry, modname)
+  local status = current.entry_state[entry_name].status
+  if status == "loading" then
+    return loading_entry_loader(current.entries[entry_name], path)
   end
-  if not is_eligible(entry, state) then
+  if status == "loaded" then
     return nil
   end
   if not current.load_entry(entry_name, "require:" .. modname) then

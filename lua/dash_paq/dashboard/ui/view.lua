@@ -1,10 +1,7 @@
 local state = require("dash_paq.dashboard.state")
 local fmt = require("dash_paq.dashboard.ui.format")
-local render = require("dash_paq.dashboard.ui.render")
 
 local M = {}
-
-M.CONTENT_WIDTH = render.CONTENT_WIDTH
 
 function M.new_context(opts)
   local cfg = state.dashboard_config
@@ -25,18 +22,6 @@ function M.new_context(opts)
     details_winid = nil,
     details_bufnr = nil,
   })
-end
-
-function M.render(ctx)
-  render.render(ctx)
-end
-
-function M.render_row(ctx, name)
-  render.render_row(ctx, name)
-end
-
-function M.render_header(ctx)
-  render.render_header(ctx)
 end
 
 return M

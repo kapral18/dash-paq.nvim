@@ -1,6 +1,6 @@
 local report = require("dash_paq.dashboard.report")
 local state = require("dash_paq.dashboard.state")
-local view = require("dash_paq.dashboard.ui.view")
+local render = require("dash_paq.dashboard.ui.render")
 local rows = require("dash_paq.dashboard.ui.rows")
 local version = require("dash_paq.dashboard.analysis.version")
 local gitcmd = require("dash_paq.dashboard.analysis.gitcmd")
@@ -65,9 +65,9 @@ local function start_spinner(ctx)
         return
       end
       ctx.spinner_frame = (ctx.spinner_frame or 0) + 1
-      view.render_header(ctx)
+      render.render_header(ctx)
       for name in pairs(ctx.refreshing) do
-        view.render_row(ctx, name)
+        render.render_row(ctx, name)
       end
     end)
   )
@@ -84,7 +84,7 @@ function M.update_after_scan(ctx, current_name)
       ctx.selected[row.name] = true
     end
   end
-  view.render(ctx)
+  render.render(ctx)
   M.persist_ui_state(ctx)
   if current_name and ctx.winid and vim.api.nvim_win_is_valid(ctx.winid) then
     for line, row in pairs(ctx.row_by_line) do
@@ -159,7 +159,7 @@ local function apply_pipeline_result(ctx, result, counts)
       end
     end
   end
-  view.render_row(ctx, name)
+  render.render_row(ctx, name)
 end
 
 -- Refresh targets are explicit names or all visible rows. Exclude synthetic dev
@@ -235,7 +235,7 @@ local function execute_row_op(ctx, spec)
     target_names = mark_targets(ctx, spec.names)
     total = vim.tbl_count(ctx.refreshing)
     ctx.online_check_progress = { total = total, label = spec.label or "Refreshing" }
-    view.render(ctx)
+    render.render(ctx)
     start_spinner(ctx)
     local current = rows.row_at_cursor(ctx)
     current_name = current and current.name or nil
@@ -308,7 +308,7 @@ local function execute_row_op(ctx, spec)
 
     -- `pcall` every per-row body: `apply_pipeline_result` must never be
     -- skipped, even if `apply_rows` raises instead of returning. Note:
-    -- `apply_pipeline_result`/`view.render_*` already no-op against an invalid
+    -- `apply_pipeline_result`/`render.render_*` already no-op against an invalid
     -- `ctx.bufnr` (dashboard closed mid-op, same case the spinner guards
     -- against) — closing it only skips redraws, never this chain, which must
     -- keep draining and reach `finalize` regardless, or `online_check_running`
@@ -385,7 +385,7 @@ local function execute_row_op(ctx, spec)
       if finished then
         return
       end
-      view.render_header(ctx)
+      render.render_header(ctx)
     end, function()
       if finished then
         return
@@ -416,7 +416,7 @@ local function execute_row_op(ctx, spec)
     vim.notify("Operation failed: " .. tostring(err), vim.log.levels.ERROR)
     pcall(function()
       ctx.rows = report.collect_dashboard_rows()
-      view.render(ctx)
+      render.render(ctx)
     end)
     operation_done()
   end

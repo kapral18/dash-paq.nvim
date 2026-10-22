@@ -12,16 +12,7 @@ function M.parse_release_tag(tag)
   end
 
   -- strict, like vim.pack
-  local looks_like_version = t:match("^v?%d+%.%d+%.%d+[%-%+].+$") or t:match("^v?%d+%.%d+%.%d+$")
-  if not looks_like_version then
-    return nil
-  end
-
-  local ok, parsed = pcall(vim.version.parse, t, { strict = true })
-  if ok then
-    return parsed
-  end
-  return nil
+  return vim.version.parse(t, { strict = true })
 end
 
 function M.semver_major(version)
@@ -51,8 +42,8 @@ function M.semver_triplet(version)
   end
   return {
     major = tonumber(major),
-    minor = tonumber(minor) or 0,
-    patch = tonumber(patch) or 0,
+    minor = tonumber(minor),
+    patch = tonumber(patch),
   }
 end
 

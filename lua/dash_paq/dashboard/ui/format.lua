@@ -49,7 +49,7 @@ function M.pending_line_hash(line)
 end
 
 -- Commits the update adds, and commits it reverts (vim.pack marks those `<`).
-local function pending_commit_counts(pending)
+function M.pending_commit_counts(pending)
   local ahead, behind = 0, 0
   for _, line in ipairs(vim.split(type(pending) == "string" and pending or "", "\n")) do
     if line:match("^%s*<%s*%x+") then
@@ -74,7 +74,7 @@ function M.note_cell(row)
       return "possibly breaking"
     end
     local current, target = parsed_version(row.current_version), parsed_version(row.target_version)
-    local ahead, behind = pending_commit_counts(row.pending_updates)
+    local ahead, behind = M.pending_commit_counts(row.pending_updates)
     if (current and target and vim.version.lt(target, current)) or (ahead == 0 and behind > 0) then
       return "downgrade"
     end

@@ -21,10 +21,10 @@ local function git_capture(path, args, callback)
   vim.list_extend(cmd, args)
   git.run_async(cmd, function(out)
     if out.code ~= 0 then
-      callback(nil, out.spawn_error or vim.trim(out.stderr or out.stdout or "git error"))
+      callback(nil, out.spawn_error or vim.trim(out.stderr))
       return
     end
-    callback((out.stdout or ""):gsub("\n+$", ""), nil)
+    callback(out.stdout:gsub("\n+$", ""), nil)
   end)
 end
 
@@ -32,8 +32,8 @@ end
 local function greatest_in_range(tags, range)
   local best_tag, best_v
   for _, tag in ipairs(tags) do
-    local ok, v = pcall(vim.version.parse, tag, { strict = true })
-    if ok and v and range:has(v) and (not best_v or vim.version.gt(v, best_v)) then
+    local v = vim.version.parse(tag, { strict = true })
+    if v and range:has(v) and (not best_v or vim.version.gt(v, best_v)) then
       best_tag, best_v = tag, v
     end
   end
@@ -49,7 +49,7 @@ local function resolve_target_ref(path, version, done)
   if version == nil then
     git_capture(path, { "rev-parse", "--abbrev-ref", "origin/HEAD" }, function(out, err)
       if not out then
-        done(nil, err or "no default branch")
+        done(nil, err)
         return
       end
       local branch = out:gsub("^origin/", "")
@@ -61,7 +61,7 @@ local function resolve_target_ref(path, version, done)
   if version_mod.is_version_range(version) then
     git_capture(path, { "tag", "--list", "--sort=-v:refname" }, function(out, err)
       if not out then
-        done(nil, err or "no tags")
+        done(nil, err)
         return
       end
       local tags = out == "" and {} or vim.split(out, "\n")
@@ -114,18 +114,18 @@ local function refresh_one(target, online, done)
   local function compute_status()
     git_capture(target.path, { "rev-list", "-1", "HEAD" }, function(sha_head, head_err)
       if not sha_head then
-        finalize("error", nil, nil, head_err or "failed to read HEAD")
+        finalize("error", nil, nil, head_err)
         return
       end
       resolve_target_ref(target.path, target.version, function(ref, ref_err, label)
         version_label = label
         if not ref then
-          finalize("error", sha_head, nil, ref_err or "failed to resolve target")
+          finalize("error", sha_head, nil, ref_err)
           return
         end
         git_capture(target.path, { "rev-list", "-1", ref }, function(sha_target, target_err)
           if not sha_target then
-            finalize("error", sha_head, nil, target_err or "failed to resolve target ref")
+            finalize("error", sha_head, nil, target_err)
             return
           end
           local status = sha_head ~= sha_target and "update" or "same"
@@ -156,31 +156,24 @@ local function refresh_one(target, online, done)
     return
   end
 
-  git.run_async({
-    "-C",
+  git_capture(
     target.path,
-    "-c",
-    "gc.auto=0",
-    "fetch",
-    "--quiet",
-    "--tags",
-    "--force",
-    "--recurse-submodules=yes",
-    "origin",
-  }, function(out)
-    if out.code ~= 0 then
-      finalize("error", nil, nil, out.spawn_error or vim.trim(out.stderr or out.stdout or "git fetch failed"))
-      return
+    { "fetch", "--quiet", "--tags", "--force", "--recurse-submodules=yes", "origin" },
+    function(out, err)
+      if not out then
+        finalize("error", nil, nil, err)
+        return
+      end
+      gitcmd.invalidate_tags(target.path)
+      compute_status()
     end
-    gitcmd.invalidate_tags(target.path)
-    compute_status()
-  end)
+  )
 end
 
 -- Run the per-plugin refresh pipeline concurrently.
 --   names     - optional name filter (nil = all managed plugins)
 --   online    - whether to `git fetch` before computing status
---   on_each   - called once per plugin as it resolves, with the result table
+--   on_each   - called once per plugin as it resolves, with (result, position, total)
 --   on_done   - called once after every plugin has resolved, with the count
 -- Concurrency honors `state.dashboard_config.fetch_concurrency`.
 function M.run(names, online, on_each, on_done)
@@ -260,7 +253,6 @@ function M.run(names, online, on_each, on_done)
         finish_if_done()
       end)
     end
-    finish_if_done()
   end
 
   launch_next()

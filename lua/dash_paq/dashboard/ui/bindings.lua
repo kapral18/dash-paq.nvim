@@ -1,7 +1,7 @@
 local state = require("dash_paq.dashboard.state")
 local fmt = require("dash_paq.dashboard.ui.format")
 local rows = require("dash_paq.dashboard.ui.rows")
-local view = require("dash_paq.dashboard.ui.view")
+local render = require("dash_paq.dashboard.ui.render")
 local popups = require("dash_paq.dashboard.ui.popups")
 local refresh = require("dash_paq.dashboard.ui.refresh")
 local operations = require("dash_paq.dashboard.ui.operations")
@@ -33,7 +33,7 @@ local function toggle_current(ctx)
     return
   end
   ctx.selected[row.name] = not ctx.selected[row.name]
-  view.render(ctx)
+  render.render(ctx)
 end
 
 local function visual_toggle_selection(ctx)
@@ -52,7 +52,7 @@ local function visual_toggle_selection(ctx)
   end
   vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "nx", false)
   if toggled then
-    view.render(ctx)
+    render.render(ctx)
   end
 end
 
@@ -103,11 +103,11 @@ function M.attach(ctx)
   end, { buffer = ctx.bufnr, nowait = true, silent = true })
   vim.keymap.set("n", "a", function()
     rows.toggle_all_visible(ctx)
-    view.render(ctx)
+    render.render(ctx)
   end, { buffer = ctx.bufnr, nowait = true, silent = true })
   vim.keymap.set("n", "A", function()
     ctx.selected = {}
-    view.render(ctx)
+    render.render(ctx)
   end, { buffer = ctx.bufnr, nowait = true, silent = true })
   vim.keymap.set("n", "<CR>", function()
     local row = rows.row_at_cursor(ctx)
@@ -187,12 +187,12 @@ function M.attach(ctx)
   end, { buffer = ctx.bufnr, nowait = true, silent = true })
   vim.keymap.set("n", "f", function()
     cycle_filter_mode(ctx)
-    view.render(ctx)
+    render.render(ctx)
     refresh.persist_ui_state(ctx)
   end, { buffer = ctx.bufnr, nowait = true, silent = true })
   vim.keymap.set("n", "s", function()
     ctx.sort_mode = ctx.sort_mode == "status" and "name" or "status"
-    view.render(ctx)
+    render.render(ctx)
     refresh.persist_ui_state(ctx)
   end, { buffer = ctx.bufnr, nowait = true, silent = true })
   vim.keymap.set("n", "/", function()
@@ -205,13 +205,13 @@ function M.attach(ctx)
       if ctx.winid and vim.api.nvim_win_is_valid(ctx.winid) then
         vim.api.nvim_set_current_win(ctx.winid)
       end
-      view.render(ctx)
+      render.render(ctx)
       refresh.persist_ui_state(ctx)
     end)
   end, { buffer = ctx.bufnr, nowait = true, silent = true })
   vim.keymap.set("n", "c", function()
     ctx.search_text = nil
-    view.render(ctx)
+    render.render(ctx)
     refresh.persist_ui_state(ctx)
   end, { buffer = ctx.bufnr, nowait = true, silent = true })
   vim.keymap.set("n", "?", popups.open_help, { buffer = ctx.bufnr, nowait = true, silent = true })

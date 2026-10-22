@@ -57,14 +57,7 @@ function M.summary_counts(ctx)
 end
 
 function M.selected_count(ctx, visible_only)
-  local count = 0
-  local scope = visible_only and M.visible(ctx) or ctx.rows
-  for _, row in ipairs(scope) do
-    if ctx.selected[row.name] then
-      count = count + 1
-    end
-  end
-  return count
+  return #M.selected_names(ctx, visible_only)
 end
 
 function M.selected_names(ctx, visible_only)

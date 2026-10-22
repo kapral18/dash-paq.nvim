@@ -108,8 +108,7 @@ function M.classify_base(base)
 end
 
 -- Human label for one worktree entry: "<branch>  <path>", "@<short-head>
--- <path>" when detached, or the bare path when neither is known (a plain,
--- non-git candidate).
+-- <path>" when detached, or the bare path when neither is known.
 local function candidate_label(entry)
   if type(entry.branch) == "string" and entry.branch ~= "" then
     return string.format("%s  %s", entry.branch, entry.path)
@@ -272,7 +271,7 @@ function M.matching_candidate_path(base, choice)
     kind == "container"
     and listing_failed
     and vim.fs.dirname(normalized_choice) == fs.real_path(base)
-    and vim.uv.fs_stat(vim.fs.joinpath(normalized_choice, ".git")) ~= nil
+    and M.is_git_dir(normalized_choice)
     and M.is_plugin_dir(normalized_choice)
   then
     return normalized_choice
@@ -299,13 +298,13 @@ end
 -- Overwrites the saved choices file with `choices` (name -> "upstream" |
 -- absolute path). Returns true on success.
 function M.save_choices(choices)
-  return fs.write_json(M.choices_path(), type(choices) == "table" and choices or {})
+  return fs.write_json(M.choices_path(), choices)
 end
 
 -- What a toggle should switch `base`'s plugin to: "upstream" when it currently
 -- uses a dev checkout, else the dev checkout (`default_dir`). `choice` is the
 -- saved dev.json value (the pending state: no live reload), `has_src` whether
--- an upstream clone exists to fall back to. Mirrors how the loader resolves a
+-- the spec has a `src` to fall back to. Mirrors how the loader resolves a
 -- choice: "upstream" counts only with a `src`; a path only while it names a
 -- current candidate; anything else means the default dir (when it exists).
 -- Returns the target ("upstream" | absolute path), or nil plus a reason.

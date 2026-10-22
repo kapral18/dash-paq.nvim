@@ -156,7 +156,8 @@ function M.new(opts)
 
   -- While `did_load_filetypes` is unset, defer to a one-shot `SourcePost` on
   -- `*/filetype.lua`, which sets that flag as its first statement.
-  local function source_ftdetect(root)
+  function self.source_entry_ftdetect(entry)
+    local root = resolve_root(entry)
     if type(root) ~= "string" or root == "" or vim.fn.isdirectory(root) ~= 1 then
       return
     end
@@ -182,7 +183,8 @@ function M.new(opts)
   end
 
   -- `:packadd` never runs for a `dir`/dev entry outside the native window.
-  function self.source_plugin_root(root)
+  function self.source_plugin_files(entry)
+    local root = resolve_root(entry)
     if type(root) ~= "string" or root == "" or vim.fn.isdirectory(root) ~= 1 then
       return
     end
@@ -195,17 +197,9 @@ function M.new(opts)
     end
   end
 
-  function self.source_plugin_files(entry)
-    self.source_plugin_root(resolve_root(entry))
-  end
-
-  function self.source_entry_ftdetect(entry)
-    source_ftdetect(resolve_root(entry))
-  end
-
   -- Called after inserting a root onto rtp during init: Neovim's own pending
   -- `:runtime!` will source `ftdetect/*` for free, so mark it done here to
-  -- stop a deferred `source_ftdetect` sourcing it again. No-op once init has run.
+  -- stop a deferred `source_entry_ftdetect` sourcing it again. No-op once init has run.
   function self.mark_ftdetect_pending_native(entry)
     if vim.g.did_load_filetypes then
       return
@@ -449,15 +443,7 @@ function M.new(opts)
 
   -- `:filetype plugin on`/`:filetype indent on` re-run their rtp search
   -- only for a `FileType` fired after the entry landed on rtp.
-  local NATIVE_FT_GROUP_NAMES = { "filetypeplugin", "filetypeindent" }
-
-  local function resolve_augroup_id(name)
-    local ok, id = pcall(vim.api.nvim_create_augroup, name, { clear = false })
-    if ok then
-      return id
-    end
-    return nil
-  end
+  local NATIVE_FT_GROUP_NAMES = { filetypeplugin = true, filetypeindent = true }
 
   -- A filetype the entry's own `ftdetect/` defines never fires a native
   -- `FileType`, so source it eagerly here instead of at load. Native
@@ -477,21 +463,17 @@ function M.new(opts)
           return
         end
 
-        local replay_group_ids = {}
-        for _, gname in ipairs(NATIVE_FT_GROUP_NAMES) do
-          local gid = resolve_augroup_id(gname)
-          if gid then
-            replay_group_ids[gid] = true
-          end
-        end
-
         local ok, list = pcall(vim.api.nvim_get_autocmds, { event = "FileType" })
         if not ok then
           return
         end
         local fired = {}
         for _, au in ipairs(list) do
-          if au.group and (replay_group_ids[au.group] or not before_groups[au.group]) and not fired[au.group] then
+          if
+            au.group
+            and (NATIVE_FT_GROUP_NAMES[au.group_name] or not before_groups[au.group])
+            and not fired[au.group]
+          then
             fired[au.group] = true
             pcall(vim.api.nvim_exec_autocmds, "FileType", {
               group = au.group,

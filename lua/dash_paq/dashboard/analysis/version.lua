@@ -24,8 +24,8 @@ local function greatest_tag(tags, filter)
   for _, t in ipairs(tags or {}) do
     if (not filter) or filter(t) then
       -- strict, like vim.pack
-      local ok, v = pcall(vim.version.parse, t, { strict = true })
-      if ok and v and (not best or vim.version.gt(v, best.v)) then
+      local v = vim.version.parse(t, { strict = true })
+      if v and (not best or vim.version.gt(v, best.v)) then
         best = { t = t, v = v }
       end
     end
@@ -47,8 +47,8 @@ local function compute_version_drift(declared, plugin)
   if is_version_range(declared) then
     for _, t in ipairs(tags) do
       -- strict, like vim.pack
-      local ok, v = pcall(vim.version.parse, t, { strict = true })
-      if ok and v and declared:has(v) then
+      local v = vim.version.parse(t, { strict = true })
+      if v and declared:has(v) then
         return false
       end
     end

@@ -2,6 +2,7 @@ local state = require("dash_paq.dashboard.state")
 local analysis = require("dash_paq.dashboard.analysis")
 local report = require("dash_paq.dashboard.report")
 local view = require("dash_paq.dashboard.ui.view")
+local render = require("dash_paq.dashboard.ui.render")
 local bindings = require("dash_paq.dashboard.ui.bindings")
 local refresh = require("dash_paq.dashboard.ui.refresh")
 local defaults = require("dash_paq.config").defaults.dashboard
@@ -14,10 +15,7 @@ local dashboard_winid = nil
 
 local function create_dashboard_buffer()
   local bufnr = vim.api.nvim_create_buf(false, true)
-  vim.bo[bufnr].buftype = "nofile"
   vim.bo[bufnr].bufhidden = "wipe"
-  vim.bo[bufnr].buflisted = false
-  vim.bo[bufnr].swapfile = false
   vim.bo[bufnr].modifiable = true
   vim.bo[bufnr].filetype = "dashpaq"
   return bufnr
@@ -31,7 +29,7 @@ local function open_popup_window(ctx)
   local margin = math.max(2, tonumber(cfg.margin) or defaults.margin)
 
   -- As wide as the table and header; narrower windows scroll horizontally.
-  local width = math.max(1, math.min(view.CONTENT_WIDTH, vim.o.columns - margin))
+  local width = math.max(1, math.min(render.CONTENT_WIDTH, vim.o.columns - margin))
   local height =
     math.max(1, math.min(math.max(min_height, math.floor(total_lines * height_ratio)), total_lines - margin))
   local row = math.floor((total_lines - height) / 2)
@@ -69,9 +67,9 @@ local function open_popup_window(ctx)
   })
 end
 
-function M.open(force_scan)
+function M.open(reopen)
   if dashboard_winid and vim.api.nvim_win_is_valid(dashboard_winid) then
-    if force_scan then
+    if reopen then
       pcall(vim.api.nvim_win_close, dashboard_winid, true)
       dashboard_winid = nil
     else
@@ -93,7 +91,7 @@ function M.open(force_scan)
 
   open_popup_window(ctx)
   bindings.attach(ctx)
-  view.render(ctx)
+  render.render(ctx)
   analysis.refresh_version_flags_async(function()
     -- Skip the standalone re-render while an online refresh is in flight; its
     -- finalize re-collects rows (with the now-populated flags) and re-renders.
@@ -101,7 +99,7 @@ function M.open(force_scan)
       return
     end
     ctx.rows = report.collect_dashboard_rows()
-    view.render(ctx)
+    render.render(ctx)
   end)
   -- Opening uses the same refresh path as R.
   if state.dashboard_config.refresh_on_open ~= false then

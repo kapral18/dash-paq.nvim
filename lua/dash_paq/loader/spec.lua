@@ -21,11 +21,8 @@ function M.as_list(value)
   if value == nil then
     return {}
   end
-  if type(value) == "table" then
-    if vim.islist(value) then
-      return value
-    end
-    return { value }
+  if type(value) == "table" and vim.islist(value) then
+    return value
   end
   return { value }
 end
@@ -473,14 +470,7 @@ function M.normalize_pack_version(version)
   -- `vim.pack` would reject the literal string "*" (it expects a branch/tag/
   -- commit) so we translate to an open-ended semver range which vim.pack
   -- resolves to the greatest matching tag.
-  if v == "*" then
-    local ok, range = pcall(vim.version.range, "*")
-    if ok then
-      return range
-    end
-  end
-
-  if v:find("[%^~><=]") then
+  if v == "*" or v:find("[%^~><=]") then
     local ok, range = pcall(vim.version.range, v)
     if ok then
       return range
@@ -495,18 +485,10 @@ function M.policy_tag_to_range(tag_str)
   if not parsed then
     return tag_str
   end
-  local major = parsed.major or 0
-  local minor = parsed.minor or 0
-  if major >= 1 then
-    local ok, range = pcall(vim.version.range, "^" .. major .. ".0")
-    if ok then
-      return range
-    end
-  else
-    local ok, range = pcall(vim.version.range, "~0." .. minor)
-    if ok then
-      return range
-    end
+  local ok, range =
+    pcall(vim.version.range, parsed.major >= 1 and ("^" .. parsed.major .. ".0") or ("~0." .. parsed.minor))
+  if ok then
+    return range
   end
   return tag_str
 end

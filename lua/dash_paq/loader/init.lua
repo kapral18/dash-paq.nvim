@@ -14,8 +14,6 @@ local git = require("dash_paq.git")
 local notify_err = notify.err
 local notify_warn = notify.warn
 
-local AUGROUP = nil
-
 -- First insertion lands right after `stdpath("data")/site`, matching where
 -- `:packadd!` would put it (`:h packadd`).
 local function site_path()
@@ -106,7 +104,7 @@ end
 -- run inline on the main thread). They are serialized across every plugin
 -- through this one module-local queue so many concurrent installs never
 -- oversubscribe the machine with parallel `make`/`cargo` processes.
-local shell_build_queue = {} ---@type {build: string, path: string?, on_done: fun()}[]
+local shell_build_queue = {} ---@type {name: string, build: string, path: string?, on_done: fun()}[]
 local shell_build_running = false
 
 local function process_shell_queue()
@@ -144,8 +142,6 @@ local plugin_view = spec_mod.plugin_view
 -- failed, or was a no-op. Shell-string builds are queued (see above);
 -- function and ":ex" builds still run synchronously, inline.
 local function run_build(name, build, path, on_done, spec)
-  on_done = on_done or function() end
-
   if type(build) == "function" then
     local ok, err = pcall(build, plugin_view(name, spec, path))
     if not ok then
@@ -382,17 +378,9 @@ local function install_specs(pack_specs)
   end
 end
 
-local function load_version_policy()
-  local loaded = policy.load_version_policy()
-  if loaded then
-    return loaded
-  end
-  return { plugins = {} }
-end
-
 -- `config`: `dash_paq.config`'s resolved table. `dashboard`: nil when `config.dashboard == false`.
 function M.setup(config, dashboard)
-  AUGROUP = vim.api.nvim_create_augroup("dash_paq", { clear = true })
+  local AUGROUP = vim.api.nvim_create_augroup("dash_paq", { clear = true })
 
   -- Nesting depth of `:source` calls right now; decides below whether a load's `after/plugin/**` must be queued.
   local source_depth = 0
@@ -436,7 +424,7 @@ function M.setup(config, dashboard)
   local build_hooks = {}
   local pack_specs = {}
   -- false: ignore cached pins too.
-  local version_policy = config.version_policy and load_version_policy() or { plugins = {} }
+  local version_policy = config.version_policy and policy.load_version_policy() or { plugins = {} }
   -- Per-plugin version intent published to the dashboard (drift/`"*"` warnings).
   local declared_versions = {}
 
@@ -472,17 +460,6 @@ function M.setup(config, dashboard)
   local entry_meta = {}
   local entry_state = {}
   local load_entry
-
-  local function entry_name_complete(arglead)
-    local names = {}
-    for name, entry in pairs(entries) do
-      if entry.enabled and (arglead == "" or name:find("^" .. vim.pesc(arglead))) then
-        names[#names + 1] = name
-      end
-    end
-    table.sort(names)
-    return names
-  end
 
   -- `declared` -> `registered` (deferred only) -> `loading` -> `loaded`; a disabled entry never leaves `declared`.
   for _, entry in ipairs(sorted) do
@@ -612,10 +589,7 @@ function M.setup(config, dashboard)
       -- Triggerless `lazy = true` entries load through `require()`,
       -- `:DashPaq load`, or a dependency.
       meta.defer = not force_start
-        and (#meta.cmds > 0 or #meta.events > 0 or #meta.fts > 0 or meta.has_keys or explicit_lazy)
-      if entry.dep_only and not force_start and not meta.defer then
-        meta.defer = true
-      end
+        and (#meta.cmds > 0 or #meta.events > 0 or #meta.fts > 0 or meta.has_keys or explicit_lazy or entry.dep_only)
       entry_meta[entry.name] = meta
     end
   end
@@ -627,7 +601,7 @@ function M.setup(config, dashboard)
   -- Build hooks queued during init so they don't race the native load-plugins step; flushed once on `VimEnter`.
   local queued_builds = {} ---@type {name: string, path: string?}[]
 
-  -- Runs `name`'s builds (already loaded) one at a time, in declared order:
+  -- Loads `name`, then runs its builds one at a time, in declared order:
   -- the next build only starts once the previous one's `on_done` fires (sync
   -- builds call it inline; shell builds call it from the queue above).
   local function run_plugin_builds(name, path)
@@ -773,11 +747,11 @@ function M.setup(config, dashboard)
   end
 
   -- The only place anything loads: guards re-entrancy, then walks the
-  -- algorithm every route (startup, dependency, `:DashPaq load`, a build hook, or
-  -- a cmd/event/ft/keys trigger) shares.
+  -- algorithm every route (startup, dependency, `:DashPaq load`, a build hook,
+  -- `require()`, or a cmd/event/ft/keys trigger) shares.
   local function apply_entry(entry, reason)
     local state = entry_state[entry.name]
-    if not state or state.status == "loading" or state.status == "loaded" then
+    if state.status == "loading" or state.status == "loaded" then
       return false
     end
     if not directories_available(entry, {}) then
@@ -835,15 +809,12 @@ function M.setup(config, dashboard)
     -- Every key with a known `rhs` becomes a real mapping now. An `lhs`-only
     -- key is left alone; it relies on the plugin's own `config()` to have
     -- (re)defined it.
-    local meta = entry_meta[entry.name]
-    if meta then
-      for _, key in ipairs(meta.keys) do
-        if key.rhs ~= nil then
-          if key.ft then
-            triggers.apply_loaded_ft_key(key)
-          else
-            triggers.apply_loaded_key(key)
-          end
+    for _, key in ipairs(entry_meta[entry.name].keys) do
+      if key.rhs ~= nil then
+        if key.ft then
+          triggers.apply_loaded_ft_key(key)
+        else
+          triggers.apply_loaded_key(key)
         end
       end
     end
@@ -861,7 +832,7 @@ function M.setup(config, dashboard)
 
     state.status = "loaded"
     state.loaded_at = os.date("%H:%M:%S")
-    state.loaded_by = reason or "unknown"
+    state.loaded_by = reason
     return true
   end
 
@@ -890,7 +861,6 @@ function M.setup(config, dashboard)
     entry_state = entry_state,
     entry_meta = entry_meta,
     load_entry = load_entry,
-    entry_name_complete = entry_name_complete,
   })
 
   local startup_entries = {}
@@ -921,7 +891,7 @@ function M.setup(config, dashboard)
       local meta = entry_meta[entry.name]
       entry_state[entry.name].status = "registered"
 
-      -- One invalid trigger (an unknown event, a bad key mode) is reported
+      -- One invalid trigger (a bad key mode) is reported
       -- against its entry and must not stop later entries from registering.
       local function register(what, fn, ...)
         local ok, err = pcall(fn, ...)

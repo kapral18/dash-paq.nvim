@@ -1,5 +1,7 @@
 -- Local-only git fixture builder: a bare "remote" plus a working checkout, built with real `git` commands (no
 -- network). Pins identity and signing so fixture creation never depends on the host's git config.
+local dirfixture = require("support.dirfixture")
+
 local M = {}
 
 local GIT_IDENTITY = {
@@ -29,14 +31,8 @@ local function run(args, cwd)
   return vim.trim(result.stdout or "")
 end
 
-local counter = 0
 local function tmp_dir(label)
-  counter = counter + 1
-  local uv = vim.uv
-  local base = (os.getenv("TMPDIR") or "/tmp"):gsub("/+$", "")
-  local dir = string.format("%s/dash-paq-fixtures/%d-%d-%s", base, uv.os_getpid(), counter, label or "d")
-  vim.fn.mkdir(dir, "p")
-  return dir
+  return dirfixture.fresh_dir("dash-paq-fixtures", label or "d")
 end
 
 M.tmp_dir = tmp_dir
@@ -63,9 +59,7 @@ end
 -- Writes and commits `files` (path -> content, empty/nil for an empty commit); returns the SHA.
 function M.commit(remote, message, files)
   for path, content in pairs(files or {}) do
-    local full = vim.fs.joinpath(remote.work, path)
-    vim.fn.mkdir(vim.fs.dirname(full), "p")
-    vim.fn.writefile(vim.split(content, "\n"), full)
+    dirfixture.write(remote.work, path, vim.split(content, "\n"))
   end
 
   local args = { "git", "-C", remote.work }

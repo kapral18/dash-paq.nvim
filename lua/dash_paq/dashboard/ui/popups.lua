@@ -30,8 +30,8 @@ local function new_builder()
     return b.line({})
   end
   -- Highlight a whole line (1-based) over the per-chunk colors.
-  function b.whole(line_no, hl, priority)
-    b.marks[#b.marks + 1] = { line_no - 1, 0, #b.lines[line_no], hl, priority or 150 }
+  function b.whole(line_no, hl)
+    b.marks[#b.marks + 1] = { line_no - 1, 0, #b.lines[line_no], hl, 150 }
   end
   return b
 end
@@ -78,7 +78,7 @@ end
 local function open_float(bufnr, wrap_shift)
   local editor_w = vim.o.columns
   local editor_h = vim.o.lines - vim.o.cmdheight
-  local margin = math.max(2, tonumber((state.dashboard_config or {}).margin) or defaults.margin)
+  local margin = math.max(2, tonumber(state.dashboard_config.margin) or defaults.margin)
   local width = math.max(1, math.min(render.CONTENT_WIDTH, editor_w - margin))
   local config = {
     relative = "editor",
@@ -175,12 +175,7 @@ function M.open_details(ctx, row)
   if is_error then
     b.line({ { "Error", "DashPaqStatusError" } })
   else
-    local commits = 0
-    for _, line in ipairs(body) do
-      if pending_line_hash(line) then
-        commits = commits + 1
-      end
-    end
+    local commits = fmt.pending_commit_counts(pending)
     b.line({ { "Pending updates", "DashPaqH2" }, { commits > 0 and (" (" .. commits .. ")") or "", "DashPaqMeta" } })
   end
   if not has_pending then
@@ -193,8 +188,7 @@ function M.open_details(ctx, row)
     else
       local hash = pending_line_hash(line)
       if hash and breaking_hashes[hash] then
-        -- Above the hash accent so the whole commit reads as breaking.
-        b.whole(line_no, "DashPaqRiskBreak", 200)
+        b.whole(line_no, "DashPaqRiskBreak")
       elseif hash then
         local hstart = b.lines[line_no]:find(hash, 1, true)
         b.marks[#b.marks + 1] = { line_no - 1, hstart - 1, hstart - 1 + #hash, "DashPaqStatusUpdate", 160 }
@@ -214,10 +208,7 @@ function M.open_details(ctx, row)
   local lines = b.lines
 
   ctx.details_bufnr = vim.api.nvim_create_buf(false, true)
-  vim.bo[ctx.details_bufnr].buftype = "nofile"
   vim.bo[ctx.details_bufnr].bufhidden = "wipe"
-  vim.bo[ctx.details_bufnr].buflisted = false
-  vim.bo[ctx.details_bufnr].swapfile = false
   -- Plain buffer (not markdown): the body is `Label value` log text, so markdown
   -- syntax would mis-color commit subjects containing `*`/`#`/`_`. Our extmarks
   -- supply all the structure coloring instead.
@@ -362,9 +353,7 @@ function M.open_help()
   add_key_hints(b, { { "q", "close" } })
 
   local hbuf = vim.api.nvim_create_buf(false, true)
-  vim.bo[hbuf].buftype = "nofile"
   vim.bo[hbuf].bufhidden = "wipe"
-  vim.bo[hbuf].swapfile = false
   vim.api.nvim_buf_set_lines(hbuf, 0, -1, false, b.lines)
   vim.bo[hbuf].modifiable = false
   render.ensure_highlights()

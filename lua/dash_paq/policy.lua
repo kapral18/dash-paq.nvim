@@ -32,9 +32,6 @@ function M.version_policy_path()
 end
 
 local function read_tag_dates(path)
-  if type(path) ~= "string" or path == "" then
-    return {}
-  end
   local format = "--format=%(refname:short)\t%(creatordate:unix)"
   local result = git
     .run({ "-C", path, "for-each-ref", "--sort=-creatordate", format, "refs/tags" }, { text = true })
@@ -50,16 +47,13 @@ local function read_tag_dates(path)
     -- Prereleases sort below their release, so a range pinned from one
     -- (`v3.0.0-rc1` -> `^3.0`) would match no tag.
     if ts and parsed and parsed.prerelease == nil then
-      out[#out + 1] = { tag = tag, ts = tonumber(ts) or 0 }
+      out[#out + 1] = { tag = tag, ts = tonumber(ts) }
     end
   end
   return out
 end
 
 local function tags_reachable_from(path, ref)
-  if type(path) ~= "string" or path == "" or type(ref) ~= "string" or ref == "" then
-    return nil
-  end
   local result = git.run({ "-C", path, "tag", "--merged", ref }, { text = true }):wait()
   if result.code ~= 0 or type(result.stdout) ~= "string" then
     return nil
@@ -79,7 +73,7 @@ local function latest_semver_tag(tags_with_dates, reachable_set)
   local best_v = nil
   local best_reachable = nil
   local best_reachable_v = nil
-  for _, item in ipairs(tags_with_dates or {}) do
+  for _, item in ipairs(tags_with_dates) do
     local tag = item.tag
     local v = parse_release_tag(tag)
     if v ~= nil then
@@ -102,9 +96,6 @@ local function latest_semver_tag(tags_with_dates, reachable_set)
 end
 
 local function commit_count_between(path, from_ref, to_ref)
-  if type(path) ~= "string" or path == "" then
-    return nil
-  end
   local result = git.run({ "-C", path, "rev-list", "--count", from_ref .. ".." .. to_ref }, { text = true }):wait()
   if result.code ~= 0 or type(result.stdout) ~= "string" then
     return nil
@@ -113,9 +104,6 @@ local function commit_count_between(path, from_ref, to_ref)
 end
 
 local function origin_head_ref(path)
-  if type(path) ~= "string" or path == "" then
-    return nil
-  end
   local result = git
     .run({ "-C", path, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD" }, { text = true })
     :wait()
@@ -126,26 +114,13 @@ local function origin_head_ref(path)
   return ref ~= "" and ref or nil
 end
 
-local function avg_commits_per_release(path, tags_with_dates, limit)
-  limit = tonumber(limit) or cfg.avg_window
-  if limit < 3 then
-    limit = 3
-  end
-  if type(tags_with_dates) ~= "table" or #tags_with_dates < 2 then
+local function avg_commits_per_release(path, tags_with_dates)
+  if #tags_with_dates < 2 then
     return nil
   end
-
   local tags = {}
-  for _, item in ipairs(tags_with_dates) do
-    if type(item) == "table" and type(item.tag) == "string" and item.tag ~= "" then
-      tags[#tags + 1] = item.tag
-    end
-    if #tags >= limit then
-      break
-    end
-  end
-  if #tags < 2 then
-    return nil
+  for i = 1, math.min(math.ceil(math.max(cfg.avg_window, 3)), #tags_with_dates) do
+    tags[i] = tags_with_dates[i].tag
   end
 
   local weighted_sum = 0
@@ -165,9 +140,6 @@ local function avg_commits_per_release(path, tags_with_dates, limit)
 end
 
 local function current_head_tag(path)
-  if type(path) ~= "string" or path == "" then
-    return nil
-  end
   local result = git.run({ "-C", path, "describe", "--tags", "--exact-match", "HEAD" }, { text = true }):wait()
   if result.code ~= 0 or type(result.stdout) ~= "string" then
     return nil
@@ -188,32 +160,22 @@ local function decide_tag_strategy(path)
   local head_ref = origin_head_ref(path) or "origin/HEAD"
   local reachable = tags_reachable_from(path, head_ref)
   local latest = latest_semver_tag(tag_dates, reachable)
-  if not latest then
-    return { strategy = "branch", semver_tags = false, reason = "no semver tags" }
-  end
 
   local commits_since = commit_count_between(path, latest.tag, head_ref)
-  local cur_tag = current_head_tag(path)
-  if not commits_since then
-    return {
-      strategy = "tags",
-      semver_tags = true,
-      latest_tag = latest.tag,
-      latest_tag_ts = latest.ts,
-      current_tag = cur_tag,
-      tag_count = #tag_dates,
-      reason = "cannot count commits since tag",
-    }
-  end
-
   local base = {
     semver_tags = true,
     latest_tag = latest.tag,
     latest_tag_ts = latest.ts,
-    current_tag = cur_tag,
+    current_tag = current_head_tag(path),
     tag_count = #tag_dates,
     commits_since_tag = commits_since,
   }
+
+  if not commits_since then
+    base.strategy = "tags"
+    base.reason = "cannot count commits since tag"
+    return base
+  end
 
   if commits_since == 0 then
     base.strategy = "tags"
@@ -244,7 +206,7 @@ local function decide_tag_strategy(path)
   end
 
   -- Gate 2: compare against average release size.
-  local avg = avg_commits_per_release(path, tag_dates, cfg.avg_window)
+  local avg = avg_commits_per_release(path, tag_dates)
   base.avg_commits_per_release = avg
   if avg and avg > 0 and commits_since > (avg * multiplier) then
     base.strategy = "branch"
@@ -253,10 +215,10 @@ local function decide_tag_strategy(path)
   end
 
   -- Gate 3: time since latest tag — stale releases indicate abandoned tagging.
-  if latest.ts and latest.ts > 0 then
+  if latest.ts > 0 then
     local age_days = (os.time() - latest.ts) / 86400
     base.tag_age_days = math.floor(age_days)
-    if age_days > max_tag_age_days and commits_since > 0 then
+    if age_days > max_tag_age_days then
       base.strategy = "branch"
       base.reason = "latest tag is " .. math.floor(age_days) .. "d old with " .. commits_since .. " unreleased commits"
       return base
@@ -291,9 +253,6 @@ end
 -- `generated_at` starts the TTL clock; partial writes pass the existing one so
 -- adding or invalidating one plugin never postpones re-evaluating the rest.
 function M.write_version_policy(plugins, generated_at)
-  if type(plugins) ~= "table" then
-    return false
-  end
   return fs.write_json(
     M.version_policy_path(),
     { schema = M.SCHEMA, generated_at = generated_at or os.time(), plugins = plugins }
@@ -301,13 +260,14 @@ function M.write_version_policy(plugins, generated_at)
 end
 
 -- Returns "fresh" (cache still valid), "full" (expired or schema mismatch,
--- recompute everything), or "incremental" (valid but missing some plugins).
+-- recompute everything), or "incremental" (valid, but a plugin is missing or
+-- its src changed).
 local function policy_refresh_mode(existing, installed)
-  if type(existing) ~= "table" or existing.schema ~= M.SCHEMA or type(existing.plugins) ~= "table" then
+  if not existing or existing.schema ~= M.SCHEMA then
     return "full"
   end
 
-  local generated_at = tonumber(existing.generated_at) or 0
+  local generated_at = existing.generated_at or 0
   local max_age = cfg.ttl_days * 60 * 60 * 24
   if generated_at > 0 and (os.time() - generated_at) > max_age then
     return "full"
@@ -340,11 +300,10 @@ end
 local ASYNC_STEP_YIELD_MS = 1
 
 -- What a refresh must do for the installed plugin set. Returns nil when
--- `vim.pack.get` fails, else `{ mode, plugins, pending }`: `mode` is "fresh"
--- (cache still valid), "full" (expired or schema mismatch), or "incremental"
--- (valid but missing some plugins); `plugins` is the cached entries to keep
--- (removed plugins dropped); `pending` is the `{ name, path }` list to
--- recompute.
+-- `vim.pack.get` fails, else `{ mode, plugins, pending, generated_at }`:
+-- `mode` is `policy_refresh_mode`'s answer; `plugins` is the cached entries to
+-- keep (removed plugins dropped); `pending` is the `{ name, path, src }` list
+-- to recompute; `generated_at` is the timestamp an incremental refresh keeps.
 local function plan_refresh()
   local ok, plug_data = pcall(vim.pack.get, nil, { info = false })
   if not ok or type(plug_data) ~= "table" then
@@ -476,7 +435,7 @@ end
 function M.invalidate_version_policy(name)
   supersede_refresh()
   local existing = M.load_version_policy()
-  if type(existing) ~= "table" or type(existing.plugins) ~= "table" then
+  if not existing then
     return true
   end
   if type(name) == "string" and name ~= "" then

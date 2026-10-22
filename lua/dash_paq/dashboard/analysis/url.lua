@@ -23,7 +23,7 @@ local function parse_source_coordinates(src)
   if not host then
     host, owner, repo = normalized:match("^ssh://git@([^/]+)/([^/]+)/([^/]+)$")
   end
-  if not host or not owner or not repo then
+  if not host then
     return nil
   end
 
@@ -33,7 +33,7 @@ end
 
 local function source_to_repo_url(src)
   local host, owner, repo = parse_source_coordinates(src)
-  if not host or not owner or not repo then
+  if not host then
     return nil
   end
   return ("https://%s/%s/%s"):format(host, owner, repo)

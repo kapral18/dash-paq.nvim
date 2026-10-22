@@ -225,6 +225,7 @@ end)
 
 t.describe("rendering a dashboard with no visible rows", function()
   local view = require("dash_paq.dashboard.ui.view")
+  local render = require("dash_paq.dashboard.ui.render")
 
   local function tail_lines(rows_list, search_text, filter_mode)
     local c = view.new_context({
@@ -235,7 +236,7 @@ t.describe("rendering a dashboard with no visible rows", function()
       sort_mode = "status",
       search_text = search_text,
     })
-    view.render(c)
+    render.render(c)
     return vim.api.nvim_buf_get_lines(c.bufnr, c.header_line_count, -1, false)
   end
   local two_rows = { { name = "aaa", status = "same" }, { name = "bbb", status = "update" } }
@@ -275,6 +276,7 @@ end)
 
 t.describe("WHEN the dashboard header renders", function()
   local view = require("dash_paq.dashboard.ui.view")
+  local render = require("dash_paq.dashboard.ui.render")
   local state = require("dash_paq.dashboard.state")
   local small_rows = {
     { name = "aaa", status = "same" },
@@ -299,7 +301,7 @@ t.describe("WHEN the dashboard header renders", function()
       vim.api.nvim_open_win(c.bufnr, false, { relative = "editor", row = 0, col = 0, width = width, height = 15 })
     local saved_mode = state.pack_report_cache.mode
     state.pack_report_cache.mode = nil
-    local ok, err = pcall(view.render, c)
+    local ok, err = pcall(render.render, c)
     state.pack_report_cache.mode = saved_mode
     vim.api.nvim_win_close(c.winid, true)
     vim.o.columns = saved_columns

@@ -95,7 +95,7 @@ local function parse_pack_report_buffer(bufnr)
   end
   for name, p_data in pairs(plugins) do
     p_data.source = p_data.source or sources[name]
-    p_data.pending_updates = table.concat(p_data.pending_lines or {}, "\n")
+    p_data.pending_updates = table.concat(p_data.pending_lines, "\n")
     p_data.breaking = analysis.infer_breaking_status(p_data)
     p_data.diff_url = analysis.source_to_compare_url(p_data.source, p_data.rev_before, p_data.rev_after)
     p_data.pending_lines = nil

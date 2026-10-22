@@ -3,6 +3,7 @@ local M = {}
 
 -- Minimum Neovim version this loader's tag resolution was verified against.
 local MIN_VERSION = { major = 0, minor = 12, patch = 4 }
+local MIN_VERSION_STR = string.format("%d.%d.%d", MIN_VERSION.major, MIN_VERSION.minor, MIN_VERSION.patch)
 
 local function meets_min(v)
   if v.major ~= MIN_VERSION.major then
@@ -19,7 +20,7 @@ function M.check()
   health.start("dash-paq.nvim")
 
   local ok, dash_paq = pcall(require, "dash_paq")
-  if ok and type(dash_paq.is_configured) == "function" and dash_paq.is_configured() then
+  if ok and dash_paq.is_configured() then
     health.ok("setup() has been called")
   else
     health.error("setup() has not been called; call require('dash_paq').setup(opts)")
@@ -28,9 +29,9 @@ function M.check()
   local v = vim.version()
   local version_str = string.format("%d.%d.%d", v.major, v.minor, v.patch)
   if meets_min(v) then
-    health.ok("Neovim " .. version_str .. " >= 0.12.4")
+    health.ok("Neovim " .. version_str .. " >= " .. MIN_VERSION_STR)
   else
-    health.warn("Neovim " .. version_str .. " is below the tested minimum (0.12.4)")
+    health.warn("Neovim " .. version_str .. " is below the tested minimum (" .. MIN_VERSION_STR .. ")")
   end
 
   if type(vim.pack) == "table" and type(vim.pack.add) == "function" then

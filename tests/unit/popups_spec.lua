@@ -1,5 +1,6 @@
 local t = require("runner")
 local view = require("dash_paq.dashboard.ui.view")
+local render = require("dash_paq.dashboard.ui.render")
 local popups = require("dash_paq.dashboard.ui.popups")
 
 vim.o.columns = 160
@@ -55,7 +56,7 @@ t.describe("WHEN the details popup opens", function()
   end)
 
   t.it("SHOULD be as wide as the dashboard and as tall as its content", function()
-    t.assert.equals(view.CONTENT_WIDTH, vim.api.nvim_win_get_width(c.details_winid))
+    t.assert.equals(render.CONTENT_WIDTH, vim.api.nvim_win_get_width(c.details_winid))
     t.assert.equals(#lines, vim.api.nvim_win_get_height(c.details_winid))
   end)
 
@@ -197,7 +198,7 @@ t.describe("WHEN the help popup opens", function()
   end)
 
   t.it("SHOULD be as wide as the dashboard", function()
-    t.assert.equals(view.CONTENT_WIDTH, vim.api.nvim_win_get_width(0))
+    t.assert.equals(render.CONTENT_WIDTH, vim.api.nvim_win_get_width(0))
   end)
 
   t.it("SHOULD highlight section titles and keys", function()

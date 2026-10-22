@@ -13,6 +13,7 @@ require("dash_paq").setup({
 })
 
 local view = require("dash_paq.dashboard.ui.view")
+local render = require("dash_paq.dashboard.ui.render")
 local refresh = require("dash_paq.dashboard.ui.refresh")
 local report = require("dash_paq.dashboard.report")
 local state = require("dash_paq.dashboard.state")
@@ -20,7 +21,7 @@ local state = require("dash_paq.dashboard.state")
 local orig_pipeline = report.run_refresh_pipeline
 local orig_defer_fn = vim.defer_fn
 local orig_notify = vim.notify
-local orig_render_row = view.render_row
+local orig_render_row = render.render_row
 
 local function new_ctx()
   return view.new_context({
@@ -82,7 +83,7 @@ local function restore()
   report.run_refresh_pipeline = orig_pipeline
   vim.defer_fn = orig_defer_fn
   vim.notify = orig_notify
-  view.render_row = orig_render_row
+  render.render_row = orig_render_row
 end
 
 t.describe("results delivered in separate callbacks of one event-loop pass", function()
@@ -212,7 +213,7 @@ t.describe("apply_pipeline_result raises after the row was already tallied", fun
   local h
   do
     -- First render of the row raises once (after the tally); the drain's fallback re-applies it as an error.
-    view.render_row = function(...)
+    render.render_row = function(...)
       if not raised then
         raised = true
         error("boom-render")

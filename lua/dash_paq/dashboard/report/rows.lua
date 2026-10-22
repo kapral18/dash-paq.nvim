@@ -5,13 +5,12 @@ local git = require("dash_paq.git")
 
 local M = {}
 
--- Drop cache entries that no longer correspond to a managed plugin. Prevents
--- dead rows from polluting `state.pack_report_cache`. Returns true when anything was
--- purged so the caller can persist updated state.
-local function purge_stale_dashboard_state()
+-- Drop cache entries that no longer correspond to a managed plugin, and
+-- persist the cache when anything was dropped.
+function M.ensure_dashboard_cache()
   local ok, current = pcall(vim.pack.get, nil, { info = false })
   if not ok or type(current) ~= "table" then
-    return false
+    return
   end
 
   local valid_names = {}
@@ -25,20 +24,13 @@ local function purge_stale_dashboard_state()
     valid_names[name] = true
   end
   local dirty = false
-  if type(state.pack_report_cache.plugins) == "table" then
-    for name in pairs(state.pack_report_cache.plugins) do
-      if not valid_names[name] then
-        state.pack_report_cache.plugins[name] = nil
-        dirty = true
-      end
+  for name in pairs(state.pack_report_cache.plugins) do
+    if not valid_names[name] then
+      state.pack_report_cache.plugins[name] = nil
+      dirty = true
     end
   end
-
-  return dirty
-end
-
-function M.ensure_dashboard_cache()
-  if purge_stale_dashboard_state() then
+  if dirty then
     state.write_persisted_state()
   end
 end
@@ -47,7 +39,12 @@ end
 -- report cache, applying the orphan/drift/risky overrides and lazily inferring
 -- breaking status + diff URL for update rows. Shared by the full-table and the
 -- single-row builders so per-row refresh produces identical rows.
-local function build_dashboard_row(plugin, orphan_flagging, version_flagging)
+local function build_dashboard_row(plugin)
+  -- Only flag orphans once the loader has advertised its declared set.
+  -- Before publication we must not mark everything as
+  -- orphaned (e.g. when a user runs `:DashPaq` from a minimal config).
+  local orphan_flagging = state.declared_names_published
+  local version_flagging = next(state.declared_versions_cache) ~= nil
   local name = plugin.spec.name
   local p_data = state.pack_report_cache.plugins[name]
   if p_data and not git.same_remote(p_data.source, plugin.spec.src) then
@@ -172,18 +169,12 @@ local function collect_dashboard_rows()
     return {}
   end
 
-  -- Only flag orphans once the loader has advertised its declared set.
-  -- Before publication we must not mark everything as
-  -- orphaned (e.g. when a user runs `:DashPaq` from a minimal config).
-  local orphan_flagging = state.declared_names_published
-  local version_flagging = next(state.declared_versions_cache) ~= nil
-
   local rows = {}
   for _, plugin in ipairs(plugins) do
     -- A `dev` name always wins over any on-disk clone of the same name: the
     -- dev directory is what loads; `collect_dev_rows` covers it.
     if not state.dev_plugin_paths_cache[plugin.spec.name] then
-      rows[#rows + 1] = build_dashboard_row(plugin, orphan_flagging, version_flagging)
+      rows[#rows + 1] = build_dashboard_row(plugin)
     end
   end
   vim.list_extend(rows, collect_dev_rows())
@@ -202,9 +193,7 @@ local function collect_dashboard_row(name)
   if not ok or type(plugins) ~= "table" or not plugins[1] then
     return nil
   end
-  local orphan_flagging = state.declared_names_published
-  local version_flagging = next(state.declared_versions_cache) ~= nil
-  return build_dashboard_row(plugins[1], orphan_flagging, version_flagging)
+  return build_dashboard_row(plugins[1])
 end
 
 M.collect_dashboard_rows = collect_dashboard_rows

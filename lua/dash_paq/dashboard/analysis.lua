@@ -68,12 +68,7 @@ local function infer_breaking_status(p_data)
     return nil
   end
 
-  if
-    message_summary.fix > 0
-    and message_summary.feat == 0
-    and message_summary.refactor == 0
-    and message_summary.perf == 0
-  then
+  if message_summary.fix > 0 then
     p_data.risk_reason = "non-semver refs with fix-only commit messages"
     return false
   end
@@ -88,7 +83,7 @@ local function infer_breaking_status(p_data)
 end
 
 -- Set of short commit hashes in `rev_before..rev_after` whose full message
--- (subject or body, any case) carries a breaking marker. Lets the dashboard
+-- (subject or body) carries a breaking marker. Lets the dashboard
 -- highlight exactly the breaking commits in the pending list, including ones
 -- whose marker lives only in the body (which the subject never reveals).
 local function breaking_commit_hashes(path, rev_before, rev_after)
@@ -98,19 +93,15 @@ local function breaking_commit_hashes(path, rev_before, rev_after)
     return set
   end
   for _, record in ipairs(records) do
-    local summary = signals.classify_commit_signals(record.message)
-    if type(summary) == "table" and summary.has_breaking == true then
+    if signals.classify_commit_signals(record.message).has_breaking then
       set[record.hash] = true
     end
   end
   return set
 end
 
-M.compute_version_drift = version.compute_version_drift
-M.detect_risky_star_pin = version.detect_risky_star_pin
 M.refresh_version_flags_async = version.refresh_version_flags_async
 M.short_rev = version.short_rev
-M.classify_commit_signals = signals.classify_commit_signals
 M.breaking_commit_hashes = breaking_commit_hashes
 M.infer_breaking_status = infer_breaking_status
 M.source_to_compare_url = url.source_to_compare_url

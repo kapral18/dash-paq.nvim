@@ -32,13 +32,19 @@ local function trigger_summary(meta)
   return table.concat(parts, " ")
 end
 
--- `ctx`: { entries, sorted, entry_state, entry_meta, load_entry, entry_name_complete }
+-- `ctx`: { entries, sorted, entry_state, entry_meta, load_entry }
 function M.setup(ctx)
   local function name_complete(arglead, done)
     if #done > 0 then
       return {}
     end
-    return ctx.entry_name_complete(arglead)
+    local names = {}
+    for name, entry in pairs(ctx.entries) do
+      if entry.enabled then
+        names[#names + 1] = name
+      end
+    end
+    return commands.filter(names, arglead)
   end
 
   local function load(args)
@@ -52,13 +58,13 @@ function M.setup(ctx)
       vim.notify("Unknown or disabled plugin: " .. name, vim.log.levels.ERROR)
       return
     end
-    local was_loaded = ctx.entry_state[name] and ctx.entry_state[name].status == "loaded"
-    ctx.load_entry(name, "manual:load")
     local state = ctx.entry_state[name]
+    local was_loaded = state.status == "loaded"
+    ctx.load_entry(name, "manual:load")
     if was_loaded then
       vim.notify(name .. " already loaded", vim.log.levels.INFO)
-    elseif state and state.status == "loaded" then
-      vim.notify(string.format("%s loaded (%s)", name, state and state.loaded_by or "manual"), vim.log.levels.INFO)
+    elseif state.status == "loaded" then
+      vim.notify(string.format("%s loaded (%s)", name, state.loaded_by), vim.log.levels.INFO)
     end
   end
 
@@ -72,8 +78,8 @@ function M.setup(ctx)
 
     for _, entry in ipairs(ctx.sorted) do
       if entry.enabled and (filter == "" or entry.name == filter) then
-        local state = ctx.entry_state[entry.name] or {}
-        local meta = ctx.entry_meta[entry.name] or { cmds = {}, events = {}, fts = {}, has_keys = false }
+        local state = ctx.entry_state[entry.name]
+        local meta = ctx.entry_meta[entry.name]
         local status = state.status == "loaded" and "loaded " or "defer  "
         local loaded_by = state.loaded_by or "-"
         local loaded_at = state.loaded_at or "-"
@@ -87,10 +93,7 @@ function M.setup(ctx)
     end
 
     local bufnr = vim.api.nvim_create_buf(false, true)
-    vim.bo[bufnr].buftype = "nofile"
     vim.bo[bufnr].bufhidden = "wipe"
-    vim.bo[bufnr].buflisted = false
-    vim.bo[bufnr].swapfile = false
     vim.bo[bufnr].modifiable = true
     vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
     vim.bo[bufnr].modifiable = false

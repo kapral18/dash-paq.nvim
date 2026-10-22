@@ -1,18 +1,6 @@
 -- Local plain-directory fixture builder for the loader's `dir`/dev path (no git remote or vim.pack install).
 local M = {}
 
-local counter = 0
-local function tmp_dir(label)
-  counter = counter + 1
-  local uv = vim.uv
-  local base = (os.getenv("TMPDIR") or "/tmp"):gsub("/+$", "")
-  local dir = string.format("%s/dash-paq-dirfixtures/%d-%d-%s", base, uv.os_getpid(), counter, label or "d")
-  vim.fn.mkdir(dir, "p")
-  return dir
-end
-
-M.tmp_dir = tmp_dir
-
 -- A fresh temp dir under `namespace`; returns its path.
 function M.fresh_dir(namespace, label)
   local uv = vim.uv
@@ -20,6 +8,10 @@ function M.fresh_dir(namespace, label)
   local dir = string.format("%s/%s/%d-%d-%s", base, namespace, uv.os_getpid(), uv.hrtime(), label)
   vim.fn.mkdir(dir, "p")
   return dir
+end
+
+function M.tmp_dir(label)
+  return M.fresh_dir("dash-paq-dirfixtures", label or "d")
 end
 
 function M.write(root, rel, lines) -- lines: a string or a list of strings; creates parent dirs as needed
@@ -30,11 +22,9 @@ end
 
 -- Writes `files` (path -> content) under a fresh temp dir; returns the dir.
 function M.new(name, files)
-  local root = tmp_dir(name or "plugin")
+  local root = M.tmp_dir(name or "plugin")
   for path, content in pairs(files or {}) do
-    local full = vim.fs.joinpath(root, path)
-    vim.fn.mkdir(vim.fs.dirname(full), "p")
-    vim.fn.writefile(vim.split(content, "\n"), full)
+    M.write(root, path, vim.split(content, "\n"))
   end
   return root
 end

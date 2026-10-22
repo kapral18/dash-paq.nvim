@@ -12,8 +12,6 @@ local configured = false
 local load_version_policy = policy.load_version_policy
 local rebuild_version_policy = policy.rebuild_version_policy
 local refresh_version_policy_if_needed = policy.refresh_version_policy_if_needed
--- opts.version_policy ~= false
-local version_policy_enabled = false
 
 local function invalidate_version_evidence()
   gitcmd.invalidate_tags()
@@ -59,13 +57,13 @@ local function check_updates(offline)
   vim.pack.update(nil, { offline = offline })
   invalidate_version_evidence()
   report.refresh_pack_report_cache_from_report_buffer(stale, offline and "offline" or "online")
-  if version_policy_enabled then
+  if state.version_policy_enabled then
     pcall(refresh_version_policy_if_needed)
   end
 end
 
 local function policy_rebuild(args)
-  if not version_policy_enabled then
+  if not state.version_policy_enabled then
     vim.notify("Version policy is disabled (opts.version_policy = false)", vim.log.levels.WARN)
     return
   end
@@ -74,7 +72,7 @@ local function policy_rebuild(args)
   if ok then
     local version_policy = load_version_policy() or { plugins = {} }
     if target then
-      local info = version_policy.plugins and version_policy.plugins[target]
+      local info = version_policy.plugins[target]
       if info then
         vim.notify(
           string.format(
@@ -91,7 +89,7 @@ local function policy_rebuild(args)
     else
       local count = 0
       local tags, branch = 0, 0
-      for _, info in pairs(version_policy.plugins or {}) do
+      for _, info in pairs(version_policy.plugins) do
         count = count + 1
         if info.strategy == "tags" then
           tags = tags + 1
@@ -114,8 +112,7 @@ function M.setup(config)
     return
   end
   configured = true
-  version_policy_enabled = config.version_policy ~= false
-  state.version_policy_enabled = version_policy_enabled
+  state.version_policy_enabled = config.version_policy ~= false
   state.set_dashboard_config(config.dashboard)
   analysis.configure_hosts(config.hosts)
   state.load_persisted_state_once()

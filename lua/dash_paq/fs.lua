@@ -28,7 +28,7 @@ function M.read_json(path)
     return nil
   end
   local ok_read, lines = pcall(vim.fn.readfile, path)
-  if not ok_read or type(lines) ~= "table" or #lines == 0 then
+  if not ok_read or #lines == 0 then
     return nil
   end
   local ok_decode, decoded =
@@ -43,13 +43,10 @@ end
 -- the write succeeded.
 function M.write_json(path, value)
   local ok_json, encoded = pcall(vim.json.encode, value)
-  if not ok_json or type(encoded) ~= "string" or encoded == "" then
+  if not ok_json then
     return false
   end
-  local dir = vim.fs.dirname(path)
-  if vim.fn.isdirectory(dir) ~= 1 then
-    pcall(vim.fn.mkdir, dir, "p")
-  end
+  pcall(vim.fn.mkdir, vim.fs.dirname(path), "p")
   return (pcall(vim.fn.writefile, { encoded }, path))
 end
 

@@ -67,7 +67,7 @@ local NAME_COL, VERSION_COL, NOTE_COL = 31, 27, 17
 -- cached status icon so each row advertises its own in-flight state.
 local function status_cell_text(ctx, row)
   if ctx.refreshing and ctx.refreshing[row.name] then
-    local frames = ctx.spinner_frames or { "|", "/", "-", "\\" }
+    local frames = ctx.spinner_frames
     local frame = frames[((ctx.spinner_frame or 0) % #frames) + 1]
     return fmt.pad_cell(frame, STATUS_COL)
   end
@@ -133,12 +133,12 @@ end
 
 local FILTER_LABELS = { all = "All", updates = "Updates", issues = "Issues", selected = "Selected" }
 
--- "the Updates filter and search 'x'"; nil when nothing narrows the rows.
--- With `max_width`, the search text is shortened inside its quotes to fit.
 local function has_search(ctx)
   return type(ctx.search_text) == "string" and ctx.search_text ~= ""
 end
 
+-- "the Updates filter and search 'x'"; nil when nothing narrows the rows.
+-- With `max_width`, the search text is shortened inside its quotes to fit.
 local function active_filter_desc(ctx, max_width)
   local parts = {}
   if ctx.filter_mode ~= "all" then
