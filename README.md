@@ -1,5 +1,9 @@
 # dash-paq.nvim
 
+<img width="868" height="1412" alt="dash-paq-sm" src="https://github.com/user-attachments/assets/fff17879-da2d-4060-ad14-a882f5deea30" />
+
+---
+
 Lazy loading and an update dashboard for Neovim's [`vim.pack`](https://neovim.io/doc/user/pack.html#vim.pack).
 `vim.pack` handles installation, updates, deletion, and its lockfile. dash-paq adds:
 
