@@ -1,6 +1,6 @@
 # dash-paq.nvim
 
-<img width="868" height="1412" alt="dash-paq-sm" src="https://github.com/user-attachments/assets/fff17879-da2d-4060-ad14-a882f5deea30" />
+<img width="850" height="1036" alt="image" src="https://github.com/user-attachments/assets/9d682217-a535-40c7-9fe8-0493e0ca2786" />
 
 ---
 
